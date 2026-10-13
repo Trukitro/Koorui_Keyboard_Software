@@ -8,7 +8,7 @@ El plan está ordenado por prioridad. Primero va confirmar lo que hoy son suposi
 
 | Pendiente | Cómo se comprueba |
 |---|---|
-| Que el comando `0x1A` es realmente la batería | Anotar el valor durante un ciclo completo de descarga y carga |
+| Que el porcentaje de `0x1A` es fiable en todo el rango (ya se vio subir al cargar) | Anotar el valor durante un ciclo completo de descarga y carga |
 | Nombre y animación de los 17 modos no confirmados | Activar cada modo y comparar con el teclado real |
 | Cuál de los bytes 2 y 3 es brillo y cuál velocidad, y el rango real de la velocidad | Mover cada deslizador y observar el teclado |
 | Qué devuelve el receptor con el teclado apagado o dormido | Leer la batería con el interruptor en OFF y tras varios minutos sin uso |
@@ -17,7 +17,8 @@ El plan está ordenado por prioridad. Primero va confirmar lo que hoy son suposi
 
 ## 2. Mejoras de batería
 
-- **Detectar si está cargando.** La respuesta del comando `0x1D` tiene bytes sin identificar que podrían indicarlo.
+- ~~Detectar si está cargando.~~ Hecho: el byte 9 de la respuesta de `0x1A` vale 1 con el cable conectado.
+- **Aviso de carga completa**, para saber cuándo desconectar el cable.
 - **Historial y estimación.** Guardar las lecturas y mostrar una gráfica y los días que quedan al ritmo actual.
 - **Actualizar al usar el teclado** en lugar de cada 30 segundos fijos, y dejar de consultar cuando lleva rato inactivo.
 - **Umbral de aviso configurable** (hoy fijo en 20 %) y un segundo aviso crítico.

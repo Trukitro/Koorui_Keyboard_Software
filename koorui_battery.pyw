@@ -8,7 +8,7 @@ propietaria (usage page 0xFF1C, report ID 4) con paquetes de 64 bytes:
 donde suma = suma de los bytes 3..63. Comandos usados:
 
     0x01 / 0x02  abrir / cerrar una transaccion
-    0x1A         bateria: porcentaje en el byte 8
+    0x1A         bateria: porcentaje en el byte 8, byte 9 = 1 si esta cargando
     0x05         leer configuracion (maximo 0x18 bytes por paquete)
     0x06         escribir configuracion
 
@@ -232,17 +232,23 @@ class Keyboard:
         return page
 
     def battery(self):
-        """Mediana de varias lecturas (el valor baila 1-3 puntos). None si no hay datos."""
+        """(porcentaje, cargando) o None si no hay datos.
+
+        El porcentaje es la mediana de varias lecturas (el valor baila 1-3 puntos).
+        """
         with self.lock:
             try:
                 self._open()
-                samples = []
+                samples, charging = [], False
                 for _ in range(5):
                     r = self._tx(CMD_BATTERY)
                     if r and r[7] == 0 and 1 <= r[8] <= 100:
                         samples.append(r[8])
+                        charging = r[9] == 1
                     time.sleep(0.05)
-                return round(statistics.median(samples)) if samples else None
+                if not samples:
+                    return None
+                return round(statistics.median(samples)), charging
             except OSError:
                 return None
             finally:
@@ -313,10 +319,12 @@ def ago(ts):
     return f"hace {mins // (60 * 24)} d"
 
 
-def battery_color(percent, stale=False):
+def battery_color(percent, stale=False, charging=False):
     if percent is None:
         return QColor(110, 110, 110)
-    if percent <= LOW_BATTERY:
+    if charging:
+        c = (40, 120, 215)
+    elif percent <= LOW_BATTERY:
         c = (200, 40, 40)
     elif percent <= 50:
         c = (215, 140, 0)
@@ -327,13 +335,13 @@ def battery_color(percent, stale=False):
     return QColor(*c)
 
 
-def make_icon(percent, stale):
+def make_icon(percent, stale, charging=False):
     pm = QPixmap(64, 64)
     pm.fill(Qt.GlobalColor.transparent)
     p = QPainter(pm)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
     p.setPen(Qt.PenStyle.NoPen)
-    p.setBrush(battery_color(percent, stale))
+    p.setBrush(battery_color(percent, stale, charging))
     p.drawRoundedRect(QRectF(0, 0, 64, 64), 12, 12)
     text = "?" if percent is None else str(percent)
     font = QFont("Arial", 1, QFont.Weight.Bold)
@@ -402,6 +410,10 @@ class Model(QObject):
         return self.state.get("percent")
 
     @property
+    def charging(self):
+        return bool(self.state.get("charging")) and not self.stale
+
+    @property
     def stale(self):
         return time.time() - self.state.get("time", 0) > POLL_SECONDS * 3
 
@@ -422,7 +434,8 @@ class Model(QObject):
     def battery_text(self):
         if self.percent is None:
             return "sin datos"
-        return f"{self.percent}% · {ago(self.state['time'])}"
+        text = f"{self.percent}% · {ago(self.state['time'])}"
+        return text + " · cargando" if self.charging else text
 
     def refresh(self):
         self.wake.set()
@@ -445,11 +458,12 @@ class Model(QObject):
         threading.Thread(target=work, daemon=True).start()
 
     def _poll(self):
-        pct = self.kb.battery()
-        if pct is not None:
-            self.state = {"percent": pct, "time": time.time()}
+        reading = self.kb.battery()
+        if reading is not None:
+            pct, charging = reading
+            self.state = {"percent": pct, "time": time.time(), "charging": charging}
             save_json(STATE_FILE, self.state)
-            if pct > LOW_BATTERY:
+            if pct > LOW_BATTERY or charging:
                 self.warned = False
             elif not self.warned:
                 self.warned = True
@@ -481,7 +495,7 @@ class BatteryView(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         pct = m.percent
-        color = battery_color(pct, m.stale)
+        color = battery_color(pct, m.stale, m.charging)
         # pila
         body = QRectF(self.width() - 96, 12, 84, 30)
         p.setPen(QPen(QColor(MUTED), 2))
@@ -495,6 +509,14 @@ class BatteryView(QWidget):
             fill.setWidth(max(6.0, fill.width() * pct / 100))
             p.setBrush(color)
             p.drawRoundedRect(fill, 4, 4)
+        if m.charging:                      # rayo sobre la pila
+            cx, cy = body.center().x(), body.center().y()
+            bolt = QPainterPath()
+            for k, (dx, dy) in enumerate(((2, -11), (-7, 2), (-1, 2), (-3, 11), (7, -3), (1, -3))):
+                (bolt.moveTo if k == 0 else bolt.lineTo)(cx + dx, cy + dy)
+            bolt.closeSubpath()
+            p.setBrush(QColor("white"))
+            p.drawPath(bolt)
         # textos
         p.setPen(QColor(TEXT))
         font = QFont("Segoe UI", 1, QFont.Weight.DemiBold)
@@ -869,7 +891,7 @@ class Tray(QSystemTrayIcon):
 
     def sync(self):
         m = self.model
-        self.setIcon(make_icon(m.percent, m.stale))
+        self.setIcon(make_icon(m.percent, m.stale, m.charging))
         lights = m.mode_label(m.value(OFF_MODE)) if m.page is not None else "sin datos"
         self.setToolTip(f"KOORUI · Bateria {m.battery_text()}\nLuces: {lights}")
 

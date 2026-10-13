@@ -15,6 +15,7 @@ KOORUI no publica software para este teclado y, en modo 2.4 GHz, no hay forma de
 ## Qué hace
 
 - Muestra el porcentaje de batería como número en el icono de la bandeja (verde, naranja o rojo) y avisa al bajar del 20 %.
+- Detecta cuándo el teclado está cargando: el icono pasa a azul y el panel muestra un rayo.
 - Al hacer clic en el icono abre un panel con:
   - un teclado en miniatura animado con el modo y el color actuales;
   - los 18 modos de luz, cada uno con su miniatura animada;
@@ -76,7 +77,7 @@ La suma es la de los bytes 3 a 63. En las respuestas, un estado `0xFF` significa
 | Comando | Función |
 |---|---|
 | `0x01` / `0x02` | Abrir / cerrar una transacción |
-| `0x1A` | Batería: porcentaje en el byte 8 |
+| `0x1A` | Batería: porcentaje en el byte 8; el byte 9 vale 1 mientras carga |
 | `0x05` | Leer configuración (máximo 24 bytes por paquete) |
 | `0x06` | Escribir configuración |
 | `0x1D` | Identificación del modelo (`UK6133`) |
@@ -100,7 +101,7 @@ Las teclas Fn nunca llegan al PC (las interpreta el propio teclado), por eso las
 ## Limitaciones conocidas
 
 - Probado en un solo teclado. Otros modelos de KOORUI, u otros teclados con un receptor distinto, probablemente no funcionen.
-- Que el comando `0x1A` devuelve la batería es una deducción: es el único valor que se comporta como un porcentaje. No hay documentación oficial que lo confirme.
+- No hay documentación oficial del comando `0x1A`. Se comprobó que el valor sube mientras el cable está conectado y que el indicador de carga cambia al conectar y desconectar, pero falta validarlo durante una descarga completa.
 - Solo está confirmado que el modo 6 es color fijo. Los nombres de los otros 17 modos vienen de la tabla habitual de los teclados EVision y pueden no coincidir; se corrigen con clic derecho.
 - Las animaciones del panel son aproximaciones, no una copia exacta de los efectos del teclado.
 - La app escribe en la memoria de configuración del teclado. Un bloque inválido hace que el teclado vuelva a su iluminación de fábrica. Úsala bajo tu responsabilidad.
