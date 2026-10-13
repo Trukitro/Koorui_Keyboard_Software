@@ -346,6 +346,8 @@ def make_icon(percent, stale):
 
 
 def autostart_command():
+    if getattr(sys, "frozen", False):       # empaquetado como .exe
+        return f'"{sys.executable}"'
     return f'"{sys.executable}" "{os.path.abspath(__file__)}"'
 
 

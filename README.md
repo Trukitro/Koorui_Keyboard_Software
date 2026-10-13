@@ -2,7 +2,13 @@
 
 App de bandeja para Windows que muestra la batería del teclado **KOORUI 75% inalámbrico (82 teclas, con rueda)** en modo 2.4 GHz y permite cambiar sus luces desde el PC.
 
+El panel que se abre al hacer clic en el icono:
+
 ![Panel de la app](docs/screenshot.png)
+
+El icono en la bandeja del sistema muestra el porcentaje y cambia de color según el nivel (gris si no hay lectura):
+
+![Iconos de la bandeja](docs/tray.png)
 
 KOORUI no publica software para este teclado y, en modo 2.4 GHz, no hay forma de saber cuánta batería le queda. Esta app lo resuelve hablando directamente con el receptor USB mediante un protocolo obtenido por ingeniería inversa.
 
@@ -17,27 +23,29 @@ KOORUI no publica software para este teclado y, en modo 2.4 GHz, no hay forma de
 - Detecta los cambios hechos con las teclas Fn del teclado (se actualiza cada 30 segundos).
 - Opción de iniciar con Windows desde el menú del clic derecho.
 
-## Requisitos
-
-- Windows 10 u 11.
-- Python 3.10 o posterior.
-- El teclado conectado con su receptor 2.4 GHz. El receptor debe identificarse como `VID 320F / PID 50C3` ("2.4G Receiver", Telink/EVision).
-
 ## Instalación
+
+### Opción 1: ejecutable (no necesita Python)
+
+1. Descarga `KooruiKeyboard.exe` desde la [última versión publicada](https://github.com/Trukitro/Koorui_Keyboard_Software/releases/latest).
+2. Guárdalo en una carpeta fija (por ejemplo `Documentos\Koorui`) y ábrelo con doble clic.
+
+Windows puede mostrar el aviso de SmartScreen porque el ejecutable no está firmado: pulsa "Más información" y luego "Ejecutar de todas formas".
+
+### Opción 2: desde el código
+
+Requiere Python 3.10 o posterior.
 
 ```bash
 git clone https://github.com/Trukitro/Koorui_Keyboard_Software.git
 cd Koorui_Keyboard_Software
 pip install -r requirements.txt
-```
-
-## Uso
-
-Haz doble clic en `koorui_battery.pyw`, o ejecútalo sin ventana de consola:
-
-```bash
 pythonw koorui_battery.pyw
 ```
+
+En ambos casos hace falta Windows 10 u 11 y el teclado conectado con su receptor 2.4 GHz, que debe identificarse como `VID 320F / PID 50C3` ("2.4G Receiver", Telink/EVision).
+
+## Uso
 
 - **Clic izquierdo** en el icono: abre o cierra el panel.
 - **Clic derecho** en el icono: actualizar ahora, iniciar con Windows, salir.
@@ -45,6 +53,15 @@ pythonw koorui_battery.pyw
 - **Clic derecho** en un modo: cambia su nombre y la animación con la que se representa.
 
 Los nombres de los modos, la última lectura de batería y el registro de errores se guardan en `%APPDATA%\KooruiBattery`.
+
+## Compilar el ejecutable
+
+```bash
+pip install pyinstaller
+pyinstaller --onefile --noconsole --name KooruiKeyboard --icon assets/icon.ico koorui_battery.pyw
+```
+
+El resultado queda en `dist\KooruiKeyboard.exe`. Si tienes PySide6 instalado además de PyQt6, añade `--exclude-module PySide6`.
 
 ## Cómo funciona
 
@@ -96,6 +113,7 @@ Las teclas Fn nunca llegan al PC (las interpreta el propio teclado), por eso las
 | `koorui_battery.pyw` | La app: protocolo HID, modelo, panel e icono de bandeja |
 | `snapshot.py` | Herramienta de solo lectura para investigar la configuración |
 | `requirements.txt` | Dependencias |
+| `assets/icon.ico` | Icono del ejecutable |
 
 ## Licencia
 
