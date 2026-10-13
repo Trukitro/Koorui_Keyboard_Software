@@ -115,8 +115,8 @@ Las teclas Fn nunca llegan al PC (las interpreta el propio teclado), por eso las
 ## Limitaciones conocidas
 
 - Probado en un solo teclado. Otros modelos de KOORUI, u otros teclados con un receptor distinto, probablemente no funcionen.
-- No hay documentación oficial del comando `0x1A`. Se comprobó que el valor sube mientras el cable está conectado y que el indicador de carga cambia al conectar y desconectar, pero falta validarlo durante una descarga completa.
-- Solo está confirmado que el modo 6 es color fijo. Los nombres de los otros 17 modos vienen de la tabla habitual de los teclados EVision y pueden no coincidir; se corrigen con clic derecho.
+- No hay documentación oficial del protocolo. La lectura de batería (descarga y carga), los 18 modos, el brillo y la velocidad están validados en el teclado del autor.
+- Los nombres de los modos vienen de la tabla habitual de los teclados EVision; si alguno no describe bien el efecto, se cambia con clic derecho.
 - Las animaciones del panel son aproximaciones, no una copia exacta de los efectos del teclado.
 - La app escribe en la memoria de configuración del teclado. Un bloque inválido hace que el teclado vuelva a su iluminación de fábrica. Úsala bajo tu responsabilidad.
 - Solo funciona en modo 2.4 GHz; no cubre Bluetooth ni cable.

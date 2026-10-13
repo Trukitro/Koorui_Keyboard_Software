@@ -6,11 +6,10 @@ El plan está ordenado por prioridad. Primero va confirmar lo que hoy son suposi
 
 ## 1. Confirmar lo que aún es suposición
 
+Ya validado en el teclado real: batería (descarga y carga), los 18 modos, brillo y velocidad.
+
 | Pendiente | Cómo se comprueba |
 |---|---|
-| Que el porcentaje de `0x1A` es fiable en todo el rango (ya se vio subir al cargar) | Anotar el valor durante un ciclo completo de descarga y carga |
-| Nombre y animación de los 17 modos no confirmados | Activar cada modo y comparar con el teclado real |
-| Cuál de los bytes 2 y 3 es brillo y cuál velocidad, y el rango real de la velocidad | Mover cada deslizador y observar el teclado |
 | Qué devuelve el receptor con el teclado apagado o dormido | Leer la batería con el interruptor en OFF y tras varios minutos sin uso |
 | Significado de los bytes 5 y 9 de la página 0 | Fotos con `snapshot.py` antes y después de cambiar de color con Fn |
 | Qué hacen los comandos `0x0D` y `0x0E` (no contestaron al probarlos) | Investigar solo con el teclado en un estado fácil de recuperar |
