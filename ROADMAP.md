@@ -1,6 +1,6 @@
 # Plan a futuro
 
-Estado actual: **v1.0.0**. Batería en la bandeja, panel con los 18 modos, color, brillo y velocidad, ejecutable para Windows.
+Estado actual: **v1.1.0**. Batería en la bandeja con detección de carga, panel con los 18 modos, color, brillo y velocidad, ejecutable para Windows.
 
 El plan está ordenado por prioridad. Primero va confirmar lo que hoy son suposiciones, porque varias funciones futuras dependen de ello.
 

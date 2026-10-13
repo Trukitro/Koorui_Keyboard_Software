@@ -6,9 +6,23 @@ El panel que se abre al hacer clic en el icono:
 
 ![Panel de la app](docs/screenshot.png)
 
-El icono en la bandeja del sistema muestra el porcentaje y cambia de color según el nivel (gris si no hay lectura):
+### Representación de la batería
+
+El icono en la bandeja del sistema muestra el porcentaje y cambia de color según el estado:
 
 ![Iconos de la bandeja](docs/tray.png)
+
+| Color | Significado |
+|---|---|
+| Verde | Más del 50 % |
+| Naranja | Entre 21 % y 50 % |
+| Rojo | 20 % o menos (además salta un aviso) |
+| Azul | Cargando |
+| Gris | Sin lectura (teclado apagado o receptor desconectado) |
+
+Con el cable conectado, la pila del panel pasa a azul con un rayo y el texto indica "cargando":
+
+![Panel con el teclado cargando](docs/charging.png)
 
 KOORUI no publica software para este teclado y, en modo 2.4 GHz, no hay forma de saber cuánta batería le queda. Esta app lo resuelve hablando directamente con el receptor USB mediante un protocolo obtenido por ingeniería inversa.
 
