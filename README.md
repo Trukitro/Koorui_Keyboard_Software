@@ -28,15 +28,18 @@ KOORUI no publica software para este teclado y, en modo 2.4 GHz, no hay forma de
 
 ## Qué hace
 
-- Muestra el porcentaje de batería como número en el icono de la bandeja (verde, naranja o rojo) y avisa al bajar del 20 %.
-- Detecta cuándo el teclado está cargando: el icono pasa a azul y el panel muestra un rayo.
-- Al hacer clic en el icono abre un panel con:
-  - un teclado en miniatura animado con el modo y el color actuales;
-  - los 18 modos de luz, cada uno con su miniatura animada;
-  - selector de color (nueve predefinidos, multicolor o cualquier otro);
-  - deslizadores de brillo y velocidad.
-- Detecta los cambios hechos con las teclas Fn del teclado (se actualiza cada 30 segundos).
-- Opción de iniciar con Windows desde el menú del clic derecho.
+- **Batería en la bandeja**: el porcentaje como número en el icono, con color según el nivel.
+- **Detección de carga**: icono azul y un rayo sobre la pila mientras el cable está conectado.
+- **Historial y estimación**: gráfica de los últimos días (verde al descargar, azul al cargar) y tiempo restante aproximado al ritmo actual.
+- **Avisos**: batería baja, batería crítica y carga completa, con umbrales configurables.
+- **Luces**: los 18 modos con miniatura animada, color (nueve predefinidos, multicolor o cualquier otro), brillo y velocidad.
+- **Perfiles de luces**: guarda combinaciones de modo, color, brillo y velocidad con nombre y aplícalas con un clic, desde el panel o desde el menú del icono.
+- **Ajustes**: idioma (español o inglés), intervalo de consulta y umbrales de aviso.
+- Detecta los cambios hechos con las teclas Fn del teclado y puede iniciarse con Windows.
+
+Ventana de ajustes (botón del engranaje o clic derecho en el icono):
+
+![Ajustes](docs/settings.png)
 
 ## Instalación
 
@@ -66,8 +69,11 @@ En ambos casos hace falta Windows 10 u 11 y el teclado conectado con su receptor
 - **Clic derecho** en el icono: actualizar ahora, iniciar con Windows, salir.
 - **Clic** en un modo: lo activa en el teclado.
 - **Clic derecho** en un modo: cambia su nombre y la animación con la que se representa.
+- **"+ Guardar actual"**: guarda las luces de ese momento como perfil.
+- **Clic** en un perfil: lo aplica. **Clic derecho**: renombrar, actualizar con las luces actuales o eliminar.
+- **Engranaje**: abre los ajustes.
 
-Los nombres de los modos, la última lectura de batería y el registro de errores se guardan en `%APPDATA%\KooruiBattery`.
+Los perfiles, los nombres de los modos, el historial de batería (30 días), los ajustes y el registro de errores se guardan en `%APPDATA%\KooruiBattery`.
 
 ## Compilar el ejecutable
 
@@ -118,6 +124,8 @@ Las teclas Fn nunca llegan al PC (las interpreta el propio teclado), por eso las
 - No hay documentación oficial del protocolo. La lectura de batería (descarga y carga), los 18 modos, el brillo y la velocidad están validados en el teclado del autor.
 - Los nombres de los modos vienen de la tabla habitual de los teclados EVision; si alguno no describe bien el efecto, se cambia con clic derecho.
 - Las animaciones del panel son aproximaciones, no una copia exacta de los efectos del teclado.
+- El tiempo restante es una estimación a partir del tramo de descarga actual; necesita al menos media hora de lecturas y una caída de 3 puntos, y cambia según el uso y el brillo.
+- El aviso de carga completa salta al llegar al nivel configurado (100 % por defecto). Si tu teclado se queda en 98 o 99 % al terminar, baja ese nivel en los ajustes.
 - La app escribe en la memoria de configuración del teclado. Un bloque inválido hace que el teclado vuelva a su iluminación de fábrica. Úsala bajo tu responsabilidad.
 - Solo funciona en modo 2.4 GHz; no cubre Bluetooth ni cable.
 

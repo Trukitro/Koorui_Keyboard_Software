@@ -36,10 +36,10 @@ import hid
 from PyQt6.QtCore import QObject, QPointF, QRectF, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import (QAction, QColor, QCursor, QFont, QFontMetrics, QIcon, QPainter,
                          QPainterPath, QPen, QPixmap)
-from PyQt6.QtWidgets import (QApplication, QColorDialog, QComboBox, QDialog,
-                             QDialogButtonBox, QFormLayout, QGridLayout, QHBoxLayout, QLabel,
-                             QLineEdit, QMenu, QPushButton, QSlider, QSystemTrayIcon,
-                             QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QApplication, QCheckBox, QColorDialog, QComboBox, QDialog,
+                             QDialogButtonBox, QFormLayout, QGridLayout, QHBoxLayout,
+                             QInputDialog, QLabel, QLineEdit, QMenu, QPushButton, QSlider,
+                             QSpinBox, QSystemTrayIcon, QVBoxLayout, QWidget)
 
 VID, PID = 0x320F, 0x50C3
 USAGE_PAGE, USAGE = 0xFF1C, 0x92
@@ -50,22 +50,106 @@ OFF_MODE, OFF_BRIGHT, OFF_SPEED, OFF_MULTI, OFF_RGB = 1, 2, 3, 5, 6
 
 MODE_COUNT = 18
 MAX_LEVEL = 4
-COLORS = (("Naranja", (0xFF, 0x60, 0x00)), ("Rojo", (0xFF, 0x00, 0x00)),
-          ("Amarillo", (0xFF, 0xFF, 0x00)), ("Verde", (0x00, 0xFF, 0x00)),
-          ("Cian", (0x00, 0xFF, 0xFF)), ("Azul", (0x00, 0x00, 0xFF)),
-          ("Morado", (0x80, 0x00, 0xFF)), ("Rosa", (0xFF, 0x00, 0x80)),
-          ("Blanco", (0xFF, 0xFF, 0xFF)))
+# (nombre es, nombre en, rgb)
+COLORS = (("Naranja", "Orange", (0xFF, 0x60, 0x00)), ("Rojo", "Red", (0xFF, 0x00, 0x00)),
+          ("Amarillo", "Yellow", (0xFF, 0xFF, 0x00)), ("Verde", "Green", (0x00, 0xFF, 0x00)),
+          ("Cian", "Cyan", (0x00, 0xFF, 0xFF)), ("Azul", "Blue", (0x00, 0x00, 0xFF)),
+          ("Morado", "Purple", (0x80, 0x00, 0xFF)), ("Rosa", "Pink", (0xFF, 0x00, 0x80)),
+          ("Blanco", "White", (0xFF, 0xFF, 0xFF)))
 
-POLL_SECONDS = 30
-LOW_BATTERY = 20
 APP_NAME = "KooruiBattery"
 DATA_DIR = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), APP_NAME)
 STATE_FILE = os.path.join(DATA_DIR, "state.json")
 MODES_FILE = os.path.join(DATA_DIR, "modes.json")
+PROFILES_FILE = os.path.join(DATA_DIR, "profiles.json")
+HISTORY_FILE = os.path.join(DATA_DIR, "history.json")
+SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 LOG_FILE = os.path.join(DATA_DIR, "error.log")
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 
+HOUR, DAY = 3600, 86400
+HISTORY_KEEP = 30 * DAY         # se descartan lecturas mas antiguas
+HISTORY_EVERY = 600             # sin cambios, una lectura cada 10 minutos
+HISTORY_GAP = 3 * HOUR          # un hueco mayor (teclado apagado) se dibuja punteado
+
 BG, CARD, BORDER, TEXT, MUTED, ACCENT = "#15171c", "#1e2128", "#2c303a", "#e8eaf0", "#8a90a0", "#4da3ff"
+GREEN, BLUE = "#3fbf7f", "#2878d7"
+
+# Ajustes del usuario (se cargan de settings.json al arrancar).
+DEFAULTS = {"lang": "es", "poll": 30, "low": 20, "critical": 10,
+            "full_notify": True, "full_level": 100}
+CFG = dict(DEFAULTS)
+
+# Textos de la interfaz: clave -> (espanol, ingles).
+STR = {
+    "battery": ("Batería", "Battery"),
+    "no_data": ("sin datos", "no data"),
+    "charging": ("cargando", "charging"),
+    "left": ("quedan {}", "{} left"),
+    "now": ("ahora", "just now"),
+    "ago_min": ("hace {} min", "{} min ago"),
+    "ago_h": ("hace {} h", "{} h ago"),
+    "ago_d": ("hace {} d", "{} d ago"),
+    "history": ("HISTORIAL", "HISTORY"),
+    "last": ("últimas {}", "last {}"),
+    "no_history": ("Aún no hay suficientes lecturas", "Not enough readings yet"),
+    "profiles": ("PERFILES", "PROFILES"),
+    "save_profile": ("+ Guardar actual", "+ Save current"),
+    "profile_name": ("Nombre del perfil:", "Profile name:"),
+    "new_profile": ("Nuevo perfil", "New profile"),
+    "rename": ("Renombrar", "Rename"),
+    "overwrite": ("Actualizar con las luces actuales", "Update with current lights"),
+    "delete": ("Eliminar", "Delete"),
+    "profile_tip": ("Clic: aplicar · Clic derecho: más opciones",
+                    "Click: apply · Right-click: more options"),
+    "light_mode": ("MODO DE LUZ", "LIGHT MODE"),
+    "mode": ("Modo {}", "Mode {}"),
+    "mode_tip": ("Clic: activar · Clic derecho: nombre y animación",
+                 "Click: activate · Right-click: name and animation"),
+    "define_mode": ("Clic derecho en un modo para definir su animación",
+                    "Right-click a mode to set its animation"),
+    "color": ("COLOR", "COLOR"),
+    "multicolor": ("Multicolor", "Multicolor"),
+    "other_color": ("Otro color...", "Other color..."),
+    "pick_color": ("Color del teclado", "Keyboard color"),
+    "brightness": ("BRILLO", "BRIGHTNESS"),
+    "speed": ("VELOCIDAD", "SPEED"),
+    "name": ("Nombre", "Name"),
+    "animation": ("Animación", "Animation"),
+    "name_hint": ("Por ejemplo: Ola, Fijo...", "For example: Wave, Static..."),
+    "open_panel": ("Abrir panel", "Open panel"),
+    "refresh": ("Actualizar ahora", "Refresh now"),
+    "settings": ("Ajustes", "Settings"),
+    "autostart": ("Iniciar con Windows", "Start with Windows"),
+    "quit": ("Salir", "Quit"),
+    "lights": ("Luces", "Lights"),
+    "tray_profiles": ("Perfiles", "Profiles"),
+    "no_profiles": ("(ninguno guardado)", "(none saved)"),
+    "language": ("Idioma", "Language"),
+    "poll": ("Consultar cada", "Check every"),
+    "low": ("Aviso de batería baja", "Low battery warning"),
+    "critical": ("Aviso crítico (0 = desactivado)", "Critical warning (0 = off)"),
+    "full_notify": ("Avisar cuando termine de cargar", "Notify when charging is done"),
+    "full_level": ("Considerar cargado al", "Treat as charged at"),
+    "msg_no_reply": ("El teclado no respondió", "The keyboard did not respond"),
+    "msg_rejected": ("El teclado rechazó el cambio", "The keyboard rejected the change"),
+    "msg_low": ("Batería baja: {}%", "Low battery: {}%"),
+    "msg_critical": ("Batería crítica: {}%. Conecta el cable.",
+                     "Critical battery: {}%. Plug in the cable."),
+    "msg_full": ("Carga completa ({}%). Ya puedes desconectar el cable.",
+                 "Fully charged ({}%). You can unplug the cable."),
+    "kb_title": ("Teclado KOORUI", "KOORUI keyboard"),
+}
+
+
+def lang_index():
+    return 1 if CFG["lang"] == "en" else 0
+
+
+def tr(key, *args):
+    text = STR[key][lang_index()]
+    return text.format(*args) if args else text
+
 
 # Teclado 75%: anchos de tecla por fila, en unidades (cada fila suma 16).
 LAYOUT = (
@@ -142,38 +226,42 @@ def _fx_apagado(x, y, i, t, base):
     return (0.0, 0.0, 0.0)
 
 
+# clave -> (nombre es, nombre en, funcion)
 EFFECTS = {
-    "": ("Sin definir", None),
-    "fijo": ("Color fijo", _fx_fijo),
-    "respiracion": ("Respiracion", _fx_respiracion),
-    "ola": ("Ola arcoiris horizontal", _fx_ola),
-    "ola_vertical": ("Ola arcoiris vertical", _fx_ola_vertical),
-    "ciclo": ("Ciclo de colores (todo a la vez)", _fx_ciclo),
-    "rotacion": ("Colores girando", _fx_rotacion),
-    "ondas": ("Ondas desde el centro", _fx_ondas),
-    "reactivo": ("Reactivo al pulsar", _fx_reactivo),
-    "estrellas": ("Estrellas / destellos", _fx_estrellas),
-    "serpiente": ("Barrido / serpiente", _fx_serpiente),
-    "lluvia": ("Lluvia", _fx_lluvia),
-    "apagado": ("Apagado", _fx_apagado),
+    "": ("Sin definir", "Not set", None),
+    "fijo": ("Color fijo", "Static color", _fx_fijo),
+    "respiracion": ("Respiración", "Breathing", _fx_respiracion),
+    "ola": ("Ola arcoiris horizontal", "Horizontal rainbow wave", _fx_ola),
+    "ola_vertical": ("Ola arcoiris vertical", "Vertical rainbow wave", _fx_ola_vertical),
+    "ciclo": ("Ciclo de colores (todo a la vez)", "Color cycle (all keys)", _fx_ciclo),
+    "rotacion": ("Colores girando", "Spinning colors", _fx_rotacion),
+    "ondas": ("Ondas desde el centro", "Ripples from the center", _fx_ondas),
+    "reactivo": ("Reactivo al pulsar", "Reactive to key presses", _fx_reactivo),
+    "estrellas": ("Estrellas / destellos", "Stars / sparkles", _fx_estrellas),
+    "serpiente": ("Barrido / serpiente", "Sweep / snake", _fx_serpiente),
+    "lluvia": ("Lluvia", "Rain", _fx_lluvia),
+    "apagado": ("Apagado", "Off", _fx_apagado),
 }
 
-
-# Modos de fabrica segun la tabla habitual de los teclados EVision (el 6 = fijo esta
-# confirmado en este teclado). Se pueden corregir con clic derecho en cada modo.
+# Modos de fabrica segun la tabla habitual de los teclados EVision, validados en
+# este teclado. Se pueden renombrar con clic derecho en cada modo.
+# numero -> (nombre es, nombre en, animacion)
 DEFAULT_MODES = {
-    1: ("Ola corta", "ola"), 2: ("Ola larga", "ola"), 3: ("Rueda", "rotacion"),
-    4: ("Ciclo", "ciclo"), 5: ("Respirar", "respiracion"), 6: ("Fijo", "fijo"),
-    7: ("Reactivo", "reactivo"), 8: ("Onda", "ondas"), 9: ("Linea", "serpiente"),
-    10: ("Destellos", "estrellas"), 11: ("Flores", "ondas"), 12: ("Ola vert.", "ola_vertical"),
-    13: ("Huracan", "rotacion"), 14: ("Acumular", "serpiente"), 15: ("Estrellas", "estrellas"),
-    16: ("Visor", "serpiente"), 17: ("Lluvia", "lluvia"), 18: ("Ola circ.", "ondas"),
+    1: ("Ola corta", "Short wave", "ola"), 2: ("Ola larga", "Long wave", "ola"),
+    3: ("Rueda", "Wheel", "rotacion"), 4: ("Ciclo", "Cycle", "ciclo"),
+    5: ("Respirar", "Breathe", "respiracion"), 6: ("Fijo", "Static", "fijo"),
+    7: ("Reactivo", "Reactive", "reactivo"), 8: ("Onda", "Ripple", "ondas"),
+    9: ("Línea", "Line", "serpiente"), 10: ("Destellos", "Sparkle", "estrellas"),
+    11: ("Flores", "Bloom", "ondas"), 12: ("Ola vert.", "Vert. wave", "ola_vertical"),
+    13: ("Huracán", "Hurricane", "rotacion"), 14: ("Acumular", "Accumulate", "serpiente"),
+    15: ("Estrellas", "Stars", "estrellas"), 16: ("Visor", "Visor", "serpiente"),
+    17: ("Lluvia", "Rain", "lluvia"), 18: ("Ola circ.", "Circle wave", "ondas"),
 }
 
 
 def effect_color(effect, x, y, i, t, rgb, multi, level=1.0):
     """Color (QColor) de una tecla en la vista previa."""
-    fx = EFFECTS.get(effect, EFFECTS[""])[1]
+    fx = EFFECTS.get(effect, EFFECTS[""])[2]
     if fx is None:
         return QColor(48, 52, 62)
     base = _hue(x * 0.8) if multi else tuple(c / 255 for c in rgb)
@@ -288,12 +376,15 @@ class Keyboard:
 
 
 # --- utilidades -----------------------------------------------------------------
-def load_json(path):
+def load_json(path, default=None):
     try:
         with open(path, encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
     except (OSError, ValueError):
-        return {}
+        data = None
+    if default is None:
+        default = {}
+    return data if isinstance(data, type(default)) else default
 
 
 def save_json(path, data):
@@ -311,12 +402,21 @@ def log_error():
 def ago(ts):
     mins = int((time.time() - ts) / 60)
     if mins < 1:
-        return "ahora"
+        return tr("now")
     if mins < 60:
-        return f"hace {mins} min"
+        return tr("ago_min", mins)
     if mins < 60 * 24:
-        return f"hace {mins // 60} h"
-    return f"hace {mins // (60 * 24)} d"
+        return tr("ago_h", mins // 60)
+    return tr("ago_d", mins // (60 * 24))
+
+
+def human(seconds):
+    """Duracion aproximada: '3 d', '5 h' o '20 min'."""
+    if seconds >= 2 * DAY:
+        return f"{round(seconds / DAY)} d"
+    if seconds >= HOUR:
+        return f"{round(seconds / HOUR)} h"
+    return f"{max(1, round(seconds / 60))} min"
 
 
 def battery_color(percent, stale=False, charging=False):
@@ -324,7 +424,7 @@ def battery_color(percent, stale=False, charging=False):
         return QColor(110, 110, 110)
     if charging:
         c = (40, 120, 215)
-    elif percent <= LOW_BATTERY:
+    elif percent <= CFG["low"]:
         c = (200, 40, 40)
     elif percent <= 50:
         c = (215, 140, 0)
@@ -351,6 +451,12 @@ def make_icon(percent, stale, charging=False):
     p.drawText(QRectF(0, 0, 64, 64), Qt.AlignmentFlag.AlignCenter, text)
     p.end()
     return QIcon(pm)
+
+
+def ui_font(pixels, weight=QFont.Weight.Normal):
+    font = QFont("Segoe UI", 1, weight)
+    font.setPixelSize(pixels)
+    return font
 
 
 def autostart_command():
@@ -381,19 +487,24 @@ class Model(QObject):
 
     changed = pyqtSignal()
     message = pyqtSignal(str)
+    profiles_changed = pyqtSignal()
+    settings_changed = pyqtSignal()
 
     def __init__(self):
         super().__init__()
+        CFG.update({k: v for k, v in load_json(SETTINGS_FILE).items() if k in DEFAULTS})
         self.kb = Keyboard()
         self.state = load_json(STATE_FILE)
         self.modes = load_json(MODES_FILE)
+        self.profiles = load_json(PROFILES_FILE, [])
+        self.history = load_json(HISTORY_FILE, [])
         self.page = None
         self.started = time.time()
-        self.warned = False
+        self.warned = set()
         self.wake = threading.Event()
         threading.Thread(target=self._loop, daemon=True).start()
 
-    # lectura comoda de la pagina
+    # --- lectura comoda ---------------------------------------------------
     def value(self, off, default=0):
         return self.page[off] if self.page is not None else default
 
@@ -415,28 +526,123 @@ class Model(QObject):
 
     @property
     def stale(self):
-        return time.time() - self.state.get("time", 0) > POLL_SECONDS * 3
+        return time.time() - self.state.get("time", 0) > max(90, CFG["poll"] * 3)
 
+    def battery_text(self):
+        if self.percent is None:
+            return tr("no_data")
+        parts = [f"{self.percent}%", ago(self.state["time"])]
+        if self.charging:
+            parts.append(tr("charging"))
+        else:
+            left = self.estimate()
+            if left:
+                parts.append(tr("left", left))
+        return " · ".join(parts)
+
+    # --- modos ------------------------------------------------------------
     def mode_info(self, mode):
         info = self.modes.get(str(mode))
         if info is None:
-            return DEFAULT_MODES.get(mode, ("", ""))
+            es, en, effect = DEFAULT_MODES.get(mode, ("", "", ""))
+            return (es, en)[lang_index()], effect
         return info.get("name", ""), info.get("effect", "")
 
     def mode_label(self, mode):
-        return self.mode_info(mode)[0] or f"Modo {mode}"
+        return self.mode_info(mode)[0] or tr("mode", mode)
 
     def set_mode_info(self, mode, name, effect):
         self.modes[str(mode)] = {"name": name, "effect": effect}
         save_json(MODES_FILE, self.modes)
         self.changed.emit()
 
-    def battery_text(self):
-        if self.percent is None:
-            return "sin datos"
-        text = f"{self.percent}% · {ago(self.state['time'])}"
-        return text + " · cargando" if self.charging else text
+    # --- perfiles de luces ------------------------------------------------
+    def current_lights(self):
+        if self.page is None:
+            return None
+        return {"mode": self.page[OFF_MODE], "bright": self.page[OFF_BRIGHT],
+                "speed": self.page[OFF_SPEED], "multi": self.multi, "rgb": list(self.rgb)}
 
+    def profile_active(self, profile):
+        lights = self.current_lights()
+        return lights is not None and all(profile.get(k) == v for k, v in lights.items())
+
+    def _store_profiles(self):
+        save_json(PROFILES_FILE, self.profiles)
+        self.profiles_changed.emit()
+
+    def add_profile(self, name):
+        lights = self.current_lights()
+        if lights is not None:
+            self.profiles.append({"name": name, **lights})
+            self._store_profiles()
+
+    def rename_profile(self, index, name):
+        self.profiles[index]["name"] = name
+        self._store_profiles()
+
+    def overwrite_profile(self, index):
+        lights = self.current_lights()
+        if lights is not None:
+            self.profiles[index].update(lights)
+            self._store_profiles()
+
+    def delete_profile(self, index):
+        del self.profiles[index]
+        self._store_profiles()
+
+    def apply_profile(self, index):
+        p = self.profiles[index]
+        r, g, b = p["rgb"]
+        self.apply({OFF_MODE: p["mode"], OFF_BRIGHT: p["bright"], OFF_SPEED: p["speed"],
+                    OFF_MULTI: 0xFF if p["multi"] else 0,
+                    OFF_RGB: r, OFF_RGB + 1: g, OFF_RGB + 2: b})
+
+    # --- ajustes ----------------------------------------------------------
+    def save_settings(self, values):
+        CFG.update(values)
+        save_json(SETTINGS_FILE, CFG)
+        self.settings_changed.emit()
+        self.changed.emit()
+        self.wake.set()
+
+    # --- historial --------------------------------------------------------
+    def _record(self, pct, charging, now):
+        last = self.history[-1] if self.history else None
+        if (last and last[1] == pct and bool(last[2]) == charging
+                and now - last[0] < HISTORY_EVERY):
+            return
+        self.history.append([round(now), pct, int(charging)])
+        self.history = [h for h in self.history if h[0] >= now - HISTORY_KEEP]
+        save_json(HISTORY_FILE, self.history)
+
+    def history_window(self):
+        """Lecturas a dibujar y ancho de la ventana en segundos."""
+        now = time.time()
+        history = list(self.history)
+        if not history:
+            return [], 6 * HOUR
+        window = min(7 * DAY, max(6 * HOUR, now - history[0][0]))
+        return [h for h in history if h[0] >= now - window], window
+
+    def estimate(self):
+        """Tiempo restante aproximado al ritmo del tramo de descarga actual, o ''."""
+        if self.percent is None or self.charging:
+            return ""
+        run = []                            # del mas reciente hacia atras
+        for ts, pct, chg in reversed(list(self.history)):
+            if chg or (run and pct < run[-1][1] - 3):   # carga, o subio sin que lo vieramos
+                break
+            run.append((ts, pct))
+        if len(run) < 2:
+            return ""
+        span = run[0][0] - run[-1][0]
+        drop = run[-1][1] - run[0][1]
+        if span < 30 * 60 or drop < 3:
+            return ""
+        return "~" + human(self.percent / (drop / span))
+
+    # --- escritura y sondeo -----------------------------------------------
     def refresh(self):
         self.wake.set()
 
@@ -449,25 +655,40 @@ class Model(QObject):
         def work():
             page = self.kb.update_page(changes)
             if page is None:
-                self.message.emit("El teclado no respondio")
+                self.message.emit(tr("msg_no_reply"))
             else:
                 self.page = page
                 if any(page[off] != value for off, value in changes.items()):
-                    self.message.emit("El teclado rechazo el cambio")
+                    self.message.emit(tr("msg_rejected"))
             self.changed.emit()
         threading.Thread(target=work, daemon=True).start()
+
+    def _notify(self, pct, charging):
+        if charging:
+            self.warned -= {"low", "critical"}
+            if CFG["full_notify"] and pct >= CFG["full_level"] and "full" not in self.warned:
+                self.warned.add("full")
+                self.message.emit(tr("msg_full", pct))
+            return
+        self.warned.discard("full")
+        if pct > CFG["low"]:
+            self.warned -= {"low", "critical"}
+        if CFG["critical"] and pct <= CFG["critical"] and "critical" not in self.warned:
+            self.warned |= {"low", "critical"}
+            self.message.emit(tr("msg_critical", pct))
+        elif pct <= CFG["low"] and "low" not in self.warned:
+            self.warned.add("low")
+            self.message.emit(tr("msg_low", pct))
 
     def _poll(self):
         reading = self.kb.battery()
         if reading is not None:
             pct, charging = reading
-            self.state = {"percent": pct, "time": time.time(), "charging": charging}
+            now = time.time()
+            self.state = {"percent": pct, "time": now, "charging": charging}
             save_json(STATE_FILE, self.state)
-            if pct > LOW_BATTERY or charging:
-                self.warned = False
-            elif not self.warned:
-                self.warned = True
-                self.message.emit(f"Bateria baja: {pct}%")
+            self._record(pct, charging, now)
+            self._notify(pct, charging)
         page = self.kb.read_page()
         if page is not None:
             self.page = page
@@ -479,7 +700,7 @@ class Model(QObject):
                 self._poll()
             except Exception:
                 log_error()
-            self.wake.wait(POLL_SECONDS)
+            self.wake.wait(CFG["poll"])
             self.wake.clear()
 
 
@@ -519,16 +740,55 @@ class BatteryView(QWidget):
             p.drawPath(bolt)
         # textos
         p.setPen(QColor(TEXT))
-        font = QFont("Segoe UI", 1, QFont.Weight.DemiBold)
-        font.setPixelSize(17)
-        p.setFont(font)
+        p.setFont(ui_font(17, QFont.Weight.DemiBold))
         p.drawText(QRectF(0, 4, 220, 24), Qt.AlignmentFlag.AlignVCenter, "KOORUI 75% · 2.4G")
-        font.setPixelSize(12)
-        font.setWeight(QFont.Weight.Normal)
-        p.setFont(font)
+        p.setFont(ui_font(12))
         p.setPen(QColor(MUTED))
-        p.drawText(QRectF(0, 28, 240, 20), Qt.AlignmentFlag.AlignVCenter,
-                   "Bateria " + m.battery_text())
+        p.drawText(QRectF(0, 28, self.width() - 104, 20), Qt.AlignmentFlag.AlignVCenter,
+                   f"{tr('battery')} {m.battery_text()}")
+
+
+class HistoryView(QWidget):
+    """Grafica de la bateria: verde al descargar, azul al cargar."""
+
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+        self.setFixedHeight(62)
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(QPen(QColor(BORDER), 1))
+        p.setBrush(QColor("#0f1115"))
+        p.drawRoundedRect(QRectF(0.5, 0.5, self.width() - 1, self.height() - 1), 10, 10)
+        plot = QRectF(10, 8, self.width() - 20, self.height() - 16)
+        p.setPen(QPen(QColor(BORDER), 1, Qt.PenStyle.DotLine))
+        for frac in (0.0, 0.5, 1.0):
+            y = plot.bottom() - frac * plot.height()
+            p.drawLine(QPointF(plot.left(), y), QPointF(plot.right(), y))
+        points, window = self.model.history_window()
+        if len(points) < 2:
+            p.setPen(QColor(MUTED))
+            p.setFont(ui_font(11))
+            p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, tr("no_history"))
+            return
+        start = time.time() - window
+
+        def pos(sample):
+            return QPointF(plot.left() + (sample[0] - start) / window * plot.width(),
+                           plot.bottom() - sample[1] / 100 * plot.height())
+
+        for a, b in zip(points, points[1:]):
+            color = QColor(BLUE if b[2] else GREEN)
+            if b[0] - a[0] > HISTORY_GAP:
+                p.setPen(QPen(color, 1, Qt.PenStyle.DotLine))
+            else:
+                p.setPen(QPen(color, 2))
+            p.drawLine(pos(a), pos(b))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(BLUE if points[-1][2] else GREEN))
+        p.drawEllipse(pos(points[-1]), 3, 3)
 
 
 class KeyboardView(QWidget):
@@ -537,7 +797,7 @@ class KeyboardView(QWidget):
     def __init__(self, model):
         super().__init__()
         self.model = model
-        self.setFixedHeight(158)
+        self.setFixedHeight(134)
 
     def paintEvent(self, _):
         m = self.model
@@ -550,7 +810,7 @@ class KeyboardView(QWidget):
         effect = m.mode_info(mode)[1]
         level = 0.25 + 0.75 * min(m.value(OFF_BRIGHT, MAX_LEVEL), MAX_LEVEL) / MAX_LEVEL
         t = time.time() - m.started
-        pad = 12
+        pad = 10
         unit = (self.width() - 2 * pad) / 16
         rows = len(LAYOUT)
         row_h = (self.height() - 2 * pad) / rows
@@ -567,11 +827,8 @@ class KeyboardView(QWidget):
                 i += 1
         if not effect and m.page is not None:
             p.setPen(QColor(TEXT))
-            font = QFont("Segoe UI")
-            font.setPixelSize(12)
-            p.setFont(font)
-            p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter,
-                       "Clic derecho en un modo para definir su animacion")
+            p.setFont(ui_font(12))
+            p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, tr("define_mode"))
 
 
 class ModeTile(QWidget):
@@ -583,7 +840,6 @@ class ModeTile(QWidget):
         self.hover = False
         self.setFixedHeight(60)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip("Clic: activar · Clic derecho: nombre y animacion")
 
     def enterEvent(self, _):
         self.hover = True
@@ -621,22 +877,37 @@ class ModeTile(QWidget):
                 p.drawRoundedRect(QRectF(area.x() + c * cw + 0.8, area.y() + r * ch + 0.8,
                                          cw - 1.6, ch - 1.6), 2, 2)
         # etiqueta
-        font = QFont("Segoe UI")
-        font.setPixelSize(11)
+        font = ui_font(11)
         p.setFont(font)
         p.setPen(QColor(TEXT if selected or name else MUTED))
-        label = f"{self.mode} · {name}" if name else f"Modo {self.mode}"
+        label = f"{self.mode} · {name}" if name else tr("mode", self.mode)
         label = QFontMetrics(font).elidedText(label, Qt.TextElideMode.ElideRight, self.width() - 10)
         p.drawText(QRectF(0, 37, self.width(), 18), Qt.AlignmentFlag.AlignCenter, label)
 
 
+def paint_rainbow(p, circle):
+    """Disco multicolor recortado al circulo dado."""
+    p.save()
+    path = QPainterPath()
+    path.addEllipse(circle)
+    p.setClipPath(path)
+    p.setPen(Qt.PenStyle.NoPen)
+    for k in range(36):
+        p.setBrush(QColor.fromHsvF(k / 36, 1, 1))
+        p.drawPie(circle.adjusted(-2, -2, 2, 2), k * 160, 170)
+    p.restore()
+
+
 class Swatch(QWidget):
-    def __init__(self, model, name, rgb=None, kind="color"):
+    def __init__(self, model, names, rgb=None, kind="color"):
         super().__init__()
-        self.model, self.rgb, self.kind = model, rgb, kind
+        self.model, self.names, self.rgb, self.kind = model, names, rgb, kind
         self.setFixedSize(30, 30)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip(name)
+
+    def retranslate(self):
+        self.setToolTip(tr(self.names) if isinstance(self.names, str)
+                        else self.names[lang_index()])
 
     def is_selected(self):
         m = self.model
@@ -645,7 +916,7 @@ class Swatch(QWidget):
         if self.kind == "multi":
             return m.multi
         if self.kind == "custom":
-            return not m.multi and m.rgb not in [c for _, c in COLORS]
+            return not m.multi and m.rgb not in [c for *_, c in COLORS]
         return not m.multi and m.rgb == self.rgb
 
     def mousePressEvent(self, e):
@@ -669,15 +940,9 @@ class Swatch(QWidget):
             p.drawEllipse(QRectF(1.5, 1.5, 27, 27))
         p.setPen(Qt.PenStyle.NoPen)
         if self.kind == "multi":
-            path = QPainterPath()
-            path.addEllipse(circle)
-            p.setClipPath(path)
-            for k in range(36):
-                p.setBrush(QColor.fromHsvF(k / 36, 1, 1))
-                p.drawPie(circle.adjusted(-2, -2, 2, 2), k * 160, 170)
+            paint_rainbow(p, circle)
         elif self.kind == "custom":
-            m = self.model
-            p.setBrush(QColor(*m.rgb) if self.is_selected() else QColor(CARD))
+            p.setBrush(QColor(*self.model.rgb) if self.is_selected() else QColor(CARD))
             p.setPen(QPen(QColor(MUTED), 1))
             p.drawEllipse(circle)
             p.setPen(QPen(QColor(TEXT), 1.6))
@@ -688,20 +953,80 @@ class Swatch(QWidget):
             p.drawEllipse(circle)
 
 
+class ProfileChip(QWidget):
+    """Un perfil guardado; con index None es el boton de guardar las luces actuales."""
+
+    def __init__(self, model, panel, index=None):
+        super().__init__()
+        self.model, self.panel, self.index = model, panel, index
+        self.hover = False
+        self.setFixedHeight(30)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        if index is not None:
+            self.setToolTip(tr("profile_tip"))
+
+    def enterEvent(self, _):
+        self.hover = True
+        self.update()
+
+    def leaveEvent(self, _):
+        self.hover = False
+        self.update()
+
+    def mousePressEvent(self, e):
+        if self.index is None:
+            if e.button() == Qt.MouseButton.LeftButton:
+                self.panel.save_profile()
+        elif e.button() == Qt.MouseButton.LeftButton:
+            self.model.apply_profile(self.index)
+        elif e.button() == Qt.MouseButton.RightButton:
+            self.panel.profile_menu(self.index, e.globalPosition().toPoint())
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        box = QRectF(1, 1, self.width() - 2, self.height() - 2)
+        font = ui_font(11)
+        p.setFont(font)
+        p.setBrush(QColor("#272b34" if self.hover else CARD))
+        if self.index is None:
+            p.setPen(QPen(QColor(MUTED), 1, Qt.PenStyle.DashLine))
+            p.drawRoundedRect(box, 8, 8)
+            p.setPen(QColor(MUTED))
+            p.drawText(box, Qt.AlignmentFlag.AlignCenter, tr("save_profile"))
+            return
+        profile = self.model.profiles[self.index]
+        active = self.model.profile_active(profile)
+        p.setPen(QPen(QColor(ACCENT if active else BORDER), 2 if active else 1))
+        p.drawRoundedRect(box, 8, 8)
+        dot = QRectF(9, 9, 12, 12)
+        if profile["multi"]:
+            paint_rainbow(p, dot)
+        else:
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(*profile["rgb"]))
+            p.drawEllipse(dot)
+        p.setPen(QColor(TEXT))
+        name = QFontMetrics(font).elidedText(profile["name"], Qt.TextElideMode.ElideRight,
+                                             self.width() - 34)
+        p.drawText(QRectF(27, 0, self.width() - 32, self.height()),
+                   Qt.AlignmentFlag.AlignVCenter, name)
+
+
 class ModeDialog(QDialog):
     def __init__(self, parent, mode, name, effect):
         super().__init__(parent)
-        self.setWindowTitle(f"Modo {mode}")
+        self.setWindowTitle(tr("mode", mode))
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint)
         self.name = QLineEdit(name)
-        self.name.setPlaceholderText("Por ejemplo: Ola, Fijo, Respiracion...")
+        self.name.setPlaceholderText(tr("name_hint"))
         self.effect = QComboBox()
-        for key, (label, _) in EFFECTS.items():
-            self.effect.addItem(label, key)
+        for key, labels in EFFECTS.items():
+            self.effect.addItem(labels[lang_index()], key)
         self.effect.setCurrentIndex(max(0, self.effect.findData(effect)))
         form = QFormLayout(self)
-        form.addRow("Nombre", self.name)
-        form.addRow("Animacion", self.effect)
+        form.addRow(tr("name"), self.name)
+        form.addRow(tr("animation"), self.effect)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
                                    | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
@@ -710,28 +1035,96 @@ class ModeDialog(QDialog):
         self.setMinimumWidth(320)
 
 
+class SettingsDialog(QDialog):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowTitle(tr("settings"))
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint)
+        self.lang = QComboBox()
+        self.lang.addItem("Español", "es")
+        self.lang.addItem("English", "en")
+        self.lang.setCurrentIndex(lang_index())
+        self.poll = self.spin(10, 600, CFG["poll"], " s")
+        self.low = self.spin(5, 50, CFG["low"], " %")
+        self.critical = self.spin(0, 50, CFG["critical"], " %")
+        self.full_notify = QCheckBox()
+        self.full_notify.setChecked(CFG["full_notify"])
+        self.full_level = self.spin(80, 100, CFG["full_level"], " %")
+        form = QFormLayout(self)
+        form.setVerticalSpacing(10)
+        form.addRow(tr("language"), self.lang)
+        form.addRow(tr("poll"), self.poll)
+        form.addRow(tr("low"), self.low)
+        form.addRow(tr("critical"), self.critical)
+        form.addRow(tr("full_notify"), self.full_notify)
+        form.addRow(tr("full_level"), self.full_level)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
+                                   | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        form.addRow(buttons)
+        self.setMinimumWidth(360)
+
+    @staticmethod
+    def spin(low, high, value, suffix):
+        box = QSpinBox()
+        box.setRange(low, high)
+        box.setValue(value)
+        box.setSuffix(suffix)
+        return box
+
+    def values(self):
+        low = self.low.value()
+        return {"lang": self.lang.currentData(), "poll": self.poll.value(), "low": low,
+                "critical": min(self.critical.value(), low),
+                "full_notify": self.full_notify.isChecked(),
+                "full_level": self.full_level.value()}
+
+
 class Panel(QWidget):
     WIDTH = 440
+    PROFILE_COLS = 3
 
     def __init__(self, model):
         super().__init__()
         self.model = model
         self.busy = False           # hay un dialogo abierto: no ocultar al perder el foco
         self.hidden_at = 0.0
+        self.labels = {}
         self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint
                             | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedWidth(self.WIDTH)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(18, 16, 18, 16)
-        root.setSpacing(10)
-        root.addWidget(BatteryView(model))
+        root.setContentsMargins(18, 14, 18, 14)
+        root.setSpacing(8)
+
+        header = QHBoxLayout()
+        header.addWidget(BatteryView(model))
+        self.gear = QPushButton("⚙")
+        self.gear.setFixedSize(30, 30)
+        self.gear.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.gear.setStyleSheet(
+            f"QPushButton{{background:transparent;border:none;color:{MUTED};font-size:17px;"
+            f"padding:0;}} QPushButton:hover{{color:{TEXT};}}")
+        self.gear.clicked.connect(self.open_settings)
+        header.addWidget(self.gear)
+        root.addLayout(header)
+
+        root.addWidget(self.section("history"))
+        self.history = HistoryView(model)
+        root.addWidget(self.history)
+
         self.keyboard = KeyboardView(model)
         root.addWidget(self.keyboard)
 
-        self.mode_title = self.section("MODO DE LUZ")
-        root.addWidget(self.mode_title)
+        root.addWidget(self.section("profiles"))
+        self.profile_grid = QGridLayout()
+        self.profile_grid.setSpacing(6)
+        root.addLayout(self.profile_grid)
+
+        root.addWidget(self.section("light_mode"))
         grid = QGridLayout()
         grid.setSpacing(6)
         self.tiles = []
@@ -741,36 +1134,40 @@ class Panel(QWidget):
             grid.addWidget(tile, n // 6, n % 6)
         root.addLayout(grid)
 
-        root.addWidget(self.section("COLOR"))
+        root.addWidget(self.section("color"))
         row = QHBoxLayout()
         row.setSpacing(4)
-        self.swatches = [Swatch(model, name, rgb) for name, rgb in COLORS]
-        self.swatches.append(Swatch(model, "Multicolor", kind="multi"))
-        self.swatches.append(Swatch(model, "Otro color...", kind="custom"))
+        self.swatches = [Swatch(model, (es, en), rgb) for es, en, rgb in COLORS]
+        self.swatches.append(Swatch(model, "multicolor", kind="multi"))
+        self.swatches.append(Swatch(model, "other_color", kind="custom"))
         for s in self.swatches:
             row.addWidget(s)
         row.addStretch()
         root.addLayout(row)
 
-        self.bright = self.slider_row(root, "BRILLO", OFF_BRIGHT)
-        self.speed = self.slider_row(root, "VELOCIDAD", OFF_SPEED)
+        self.bright = self.slider_row(root, "brightness", OFF_BRIGHT)
+        self.speed = self.slider_row(root, "speed", OFF_SPEED)
 
         self.timer = QTimer(self)
         self.timer.setInterval(40)
         self.timer.timeout.connect(self.animate)
         model.changed.connect(self.sync)
-        self.sync()
+        model.profiles_changed.connect(self.rebuild_profiles)
+        model.settings_changed.connect(self.retranslate)
+        self.retranslate()
 
-    def section(self, text):
-        label = QLabel(text)
+    # --- construccion -----------------------------------------------------
+    def section(self, key):
+        label = QLabel()
         label.setStyleSheet(f"color:{MUTED}; font:600 10px 'Segoe UI'; letter-spacing:1px;"
-                            "margin-top:4px;")
+                            "margin-top:2px;")
+        self.labels[key] = label
         return label
 
-    def slider_row(self, root, text, off):
+    def slider_row(self, root, key, off):
         row = QHBoxLayout()
-        label = self.section(text)
-        label.setFixedWidth(84)
+        label = self.section(key)
+        label.setFixedWidth(92)
         slider = QSlider(Qt.Orientation.Horizontal)
         slider.setRange(0, MAX_LEVEL)
         slider.setPageStep(1)
@@ -793,6 +1190,28 @@ class Panel(QWidget):
         root.addLayout(row)
         return slider
 
+    def rebuild_profiles(self):
+        while self.profile_grid.count():
+            self.profile_grid.takeAt(0).widget().deleteLater()
+        chips = [ProfileChip(self.model, self, i) for i in range(len(self.model.profiles))]
+        chips.append(ProfileChip(self.model, self))
+        for n, chip in enumerate(chips):
+            self.profile_grid.addWidget(chip, n // self.PROFILE_COLS, n % self.PROFILE_COLS)
+        if self.isVisible():
+            QTimer.singleShot(0, self.place)
+
+    def retranslate(self):
+        for key, label in self.labels.items():
+            label.setText(tr(key))
+        for tile in self.tiles:
+            tile.setToolTip(tr("mode_tip"))
+        for swatch in self.swatches:
+            swatch.retranslate()
+        self.gear.setToolTip(tr("settings"))
+        self.rebuild_profiles()
+        self.sync()
+
+    # --- estado -----------------------------------------------------------
     def sync(self):
         m = self.model
         for slider, off in ((self.bright, OFF_BRIGHT), (self.speed, OFF_SPEED)):
@@ -801,8 +1220,10 @@ class Panel(QWidget):
                 slider.setValue(min(m.value(off), MAX_LEVEL))
                 slider.blockSignals(False)
                 slider.valueChanged.emit(slider.value())
-        self.mode_title.setText("MODO DE LUZ" + (
-            f"  ·  {m.mode_label(m.value(OFF_MODE))}" if m.page is not None else "  ·  sin datos"))
+        current = m.mode_label(m.value(OFF_MODE)) if m.page is not None else tr("no_data")
+        self.labels["light_mode"].setText(f"{tr('light_mode')}  ·  {current}")
+        window = m.history_window()[1]
+        self.labels["history"].setText(f"{tr('history')}  ·  {tr('last', human(window))}")
         self.update()
 
     def animate(self):
@@ -810,24 +1231,61 @@ class Panel(QWidget):
         for tile in self.tiles:
             tile.update()
 
+    # --- dialogos ---------------------------------------------------------
+    def modal(self, action):
+        """Ejecuta un dialogo sin que el panel se oculte al perder el foco."""
+        self.busy = True
+        try:
+            return action()
+        finally:
+            self.busy = False
+            if self.isVisible():
+                self.activateWindow()
+
     def edit_mode(self, mode):
         name, effect = self.model.mode_info(mode)
-        self.busy = True
         dlg = ModeDialog(self, mode, name, effect)
-        if dlg.exec():
+        if self.modal(dlg.exec):
             self.model.set_mode_info(mode, dlg.name.text().strip(), dlg.effect.currentData())
-        self.busy = False
-        self.activateWindow()
 
     def pick_color(self):
-        self.busy = True
-        color = QColorDialog.getColor(QColor(*self.model.rgb), self, "Color del teclado")
-        self.busy = False
-        self.activateWindow()
+        color = self.modal(lambda: QColorDialog.getColor(QColor(*self.model.rgb), self,
+                                                         tr("pick_color")))
         if color.isValid():
             self.model.apply({OFF_MULTI: 0, OFF_RGB: color.red(), OFF_RGB + 1: color.green(),
                               OFF_RGB + 2: color.blue()})
 
+    def ask_name(self, title, initial=""):
+        name, ok = self.modal(lambda: QInputDialog.getText(self, title, tr("profile_name"),
+                                                           text=initial))
+        return name.strip() if ok else ""
+
+    def save_profile(self):
+        name = self.ask_name(tr("new_profile"))
+        if name:
+            self.model.add_profile(name)
+
+    def profile_menu(self, index, pos):
+        menu = QMenu(self)
+        rename = menu.addAction(tr("rename"))
+        overwrite = menu.addAction(tr("overwrite"))
+        delete = menu.addAction(tr("delete"))
+        chosen = self.modal(lambda: menu.exec(pos))
+        if chosen == rename:
+            name = self.ask_name(tr("rename"), self.model.profiles[index]["name"])
+            if name:
+                self.model.rename_profile(index, name)
+        elif chosen == overwrite:
+            self.model.overwrite_profile(index)
+        elif chosen == delete:
+            self.model.delete_profile(index)
+
+    def open_settings(self):
+        dlg = SettingsDialog(self)
+        if self.modal(dlg.exec):
+            self.model.save_settings(dlg.values())
+
+    # --- ventana ----------------------------------------------------------
     def paintEvent(self, _):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -835,11 +1293,18 @@ class Panel(QWidget):
         p.setBrush(QColor(BG))
         p.drawRoundedRect(QRectF(0.5, 0.5, self.width() - 1, self.height() - 1), 16, 16)
 
-    def popup(self):
-        self.adjustSize()
+    def place(self):
         screen = QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
         area = screen.availableGeometry()
+        self.keyboard.setVisible(True)
+        self.adjustSize()
+        if self.sizeHint().height() > area.height() - 24:   # pantalla baja: sin miniatura
+            self.keyboard.setVisible(False)
+            self.adjustSize()
         self.move(area.right() - self.width() - 12, area.bottom() - self.height() - 12)
+
+    def popup(self):
+        self.place()
         self.show()
         self.raise_()
         self.activateWindow()
@@ -864,21 +1329,39 @@ class Tray(QSystemTrayIcon):
     def __init__(self, model, panel):
         super().__init__(make_icon(model.percent, True))
         self.model, self.panel = model, panel
-        menu = QMenu()
-        menu.addAction("Abrir panel", panel.popup)
-        menu.addAction("Actualizar ahora", model.refresh)
-        self.auto = QAction("Iniciar con Windows", menu, checkable=True)
-        self.auto.setChecked(autostart_enabled())
-        self.auto.toggled.connect(set_autostart)
-        menu.addAction(self.auto)
-        menu.addSeparator()
-        menu.addAction("Salir", QApplication.quit)
-        self.menu = menu
-        self.setContextMenu(menu)
+        self.menu = QMenu()
+        self.setContextMenu(self.menu)
         self.activated.connect(self.on_click)
         model.changed.connect(self.sync)
-        model.message.connect(lambda text: self.showMessage("Teclado KOORUI", text))
+        model.settings_changed.connect(self.build_menu)
+        model.message.connect(lambda text: self.showMessage(tr("kb_title"), text))
+        self.build_menu()
         self.sync()
+
+    def build_menu(self):
+        menu = self.menu
+        menu.clear()
+        menu.addAction(tr("open_panel"), self.panel.popup)
+        self.profiles = menu.addMenu(tr("tray_profiles"))
+        self.profiles.aboutToShow.connect(self.fill_profiles)
+        menu.addAction(tr("refresh"), self.model.refresh)
+        menu.addAction(tr("settings") + "...", self.panel.open_settings)
+        auto = QAction(tr("autostart"), menu, checkable=True)
+        auto.setChecked(autostart_enabled())
+        auto.toggled.connect(set_autostart)
+        menu.addAction(auto)
+        menu.addSeparator()
+        menu.addAction(tr("quit"), QApplication.quit)
+
+    def fill_profiles(self):
+        self.profiles.clear()
+        if not self.model.profiles:
+            self.profiles.addAction(tr("no_profiles")).setEnabled(False)
+        for index, profile in enumerate(self.model.profiles):
+            action = self.profiles.addAction(profile["name"])
+            action.setCheckable(True)
+            action.setChecked(self.model.profile_active(profile))
+            action.triggered.connect(lambda _, i=index: self.model.apply_profile(i))
 
     def on_click(self, reason):
         if reason != QSystemTrayIcon.ActivationReason.Trigger:
@@ -892,8 +1375,8 @@ class Tray(QSystemTrayIcon):
     def sync(self):
         m = self.model
         self.setIcon(make_icon(m.percent, m.stale, m.charging))
-        lights = m.mode_label(m.value(OFF_MODE)) if m.page is not None else "sin datos"
-        self.setToolTip(f"KOORUI · Bateria {m.battery_text()}\nLuces: {lights}")
+        lights = m.mode_label(m.value(OFF_MODE)) if m.page is not None else tr("no_data")
+        self.setToolTip(f"KOORUI · {tr('battery')} {m.battery_text()}\n{tr('lights')}: {lights}")
 
 
 def main():
@@ -903,16 +1386,18 @@ def main():
         return
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
+    field = (f"background:{CARD};color:{TEXT};border:1px solid {BORDER};"
+             "border-radius:6px;padding:5px;")
     app.setStyleSheet(
-        f"QDialog{{background:{BG};}} QLabel{{color:{TEXT};}}"
-        f"QLineEdit,QComboBox{{background:{CARD};color:{TEXT};border:1px solid {BORDER};"
-        "border-radius:6px;padding:5px;}"
+        f"QDialog{{background:{BG};}} QLabel,QCheckBox{{color:{TEXT};}}"
+        f"QLineEdit,QComboBox,QSpinBox{{{field}}}"
         f"QComboBox QAbstractItemView{{background:{CARD};color:{TEXT};"
         f"selection-background-color:{ACCENT};}}"
         f"QPushButton{{background:{CARD};color:{TEXT};border:1px solid {BORDER};"
         "border-radius:6px;padding:5px 14px;}"
         f"QMenu{{background:{CARD};color:{TEXT};border:1px solid {BORDER};padding:4px;}}"
         f"QMenu::item{{padding:5px 22px;}} QMenu::item:selected{{background:{ACCENT};}}"
+        f"QMenu::item:disabled{{color:{MUTED};}}"
         f"QToolTip{{background:{CARD};color:{TEXT};border:1px solid {BORDER};}}")
     model = Model()
     panel = Panel(model)

@@ -1,6 +1,6 @@
 # Plan a futuro
 
-Estado actual: **v1.1.0**. Batería en la bandeja con detección de carga, panel con los 18 modos, color, brillo y velocidad, ejecutable para Windows.
+Estado actual: **v1.2.0**. Batería con detección de carga, historial y estimación, avisos configurables, perfiles de luces, ajustes con idioma, ejecutable para Windows.
 
 El plan está ordenado por prioridad. Primero va confirmar lo que hoy son suposiciones, porque varias funciones futuras dependen de ello.
 
@@ -17,14 +17,15 @@ Ya validado en el teclado real: batería (descarga y carga), los 18 modos, brill
 ## 2. Mejoras de batería
 
 - ~~Detectar si está cargando.~~ Hecho: el byte 9 de la respuesta de `0x1A` vale 1 con el cable conectado.
-- **Aviso de carga completa**, para saber cuándo desconectar el cable.
-- **Historial y estimación.** Guardar las lecturas y mostrar una gráfica y los días que quedan al ritmo actual.
+- ~~Aviso de carga completa.~~ Hecho en v1.2.0.
+- ~~Historial y estimación.~~ Hecho en v1.2.0: gráfica de hasta 7 días y tiempo restante aproximado.
+- **Confirmar a qué porcentaje deja de cargar** el teclado, para ajustar el nivel por defecto del aviso de carga completa.
 - **Actualizar al usar el teclado** en lugar de cada 30 segundos fijos, y dejar de consultar cuando lleva rato inactivo.
-- **Umbral de aviso configurable** (hoy fijo en 20 %) y un segundo aviso crítico.
+- ~~Umbral de aviso configurable y aviso crítico.~~ Hecho en v1.2.0.
 
 ## 3. Mejoras de luces
 
-- **Perfiles**: guardar combinaciones de modo, color, brillo y velocidad con nombre y aplicarlas con un clic.
+- ~~Perfiles.~~ Hecho en v1.2.0.
 - **Atajos globales** de Windows para cambiar de perfil sin abrir el panel.
 - **Perfil por aplicación**: cambiar las luces según el programa en primer plano.
 - **Apagado automático** por horario o al bloquear el PC.
@@ -32,8 +33,8 @@ Ya validado en el teclado real: batería (descarga y carga), los 18 modos, brill
 
 ## 4. Aplicación
 
-- **Ventana de ajustes**: intervalo de consulta, umbrales, idioma.
-- **Interfaz y README en inglés**, ya que el repositorio es público.
+- ~~Ventana de ajustes e interfaz en inglés.~~ Hecho en v1.2.0.
+- **README en inglés**, ya que el repositorio es público.
 - **Instalador** con acceso directo y desinstalación, en lugar de un `.exe` suelto.
 - **Ejecutable más pequeño y rápido de abrir** (hoy 36 MB), quitando módulos de Qt que no se usan.
 - **Compilación automática** del `.exe` con GitHub Actions al publicar una versión.
