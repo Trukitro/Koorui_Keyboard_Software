@@ -115,6 +115,10 @@ Las teclas Fn nunca llegan al PC (las interpreta el propio teclado), por eso las
 | `requirements.txt` | Dependencias |
 | `assets/icon.ico` | Icono del ejecutable |
 
+## Plan a futuro
+
+Lo que queda por confirmar y las ideas para próximas versiones están en [ROADMAP.md](ROADMAP.md).
+
 ## Licencia
 
 [MIT](LICENSE). Proyecto no oficial, sin relación con KOORUI.
