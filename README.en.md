@@ -2,7 +2,7 @@
 
 **English** | [Español](README.md)
 
-Windows tray app that shows the battery level of the **KOORUI 75% wireless keyboard (82 keys, with knob)** in 2.4 GHz mode and lets you change its lighting from the PC.
+Windows tray app that shows the battery level of the **KOORUI 75% wireless keyboard (82 keys, with knob)** and lets you change its lighting from the PC. Built for 2.4 GHz mode; it also works over the cable and, for battery only, over Bluetooth.
 
 The panel that opens when you click the tray icon (the interface is available in English and Spanish; screenshots show Spanish):
 
@@ -73,7 +73,7 @@ pip install -r requirements.txt
 pythonw koorui_battery.pyw
 ```
 
-In all cases you need Windows 10 or 11 and the keyboard connected through its 2.4 GHz receiver, which must identify itself as `VID 320F / PID 50C3` ("2.4G Receiver", Telink/EVision).
+In all cases you need Windows 10 or 11 and the keyboard connected in one of the modes in the table below.
 
 ## Usage
 
@@ -103,6 +103,18 @@ iscc installer\koorui.iss
 ```
 
 The result is `dist\KooruiKeyboardSetup.exe`.
+
+## Connection modes
+
+2.4 GHz is the main mode. Wired and Bluetooth work as options; the app detects which mode the keyboard is in and shows it next to the name.
+
+| Mode | Identifies as | Battery | Charging | Lights and profiles |
+|---|---|---|---|---|
+| **2.4 GHz** (main) | `320F:50C3` "2.4G Receiver" | Yes | Yes | Yes |
+| USB cable | `320F:50C2` "USB Gaming Keyboard" | Yes | Yes | Yes |
+| Bluetooth | `245A:8276` "MK082-5.0" | Yes | No | No |
+
+Over the cable the keyboard speaks the same protocol as the receiver. Over Bluetooth that channel does not exist: the battery level comes from the standard Bluetooth LE battery service and the app reads it from Windows, so in that mode the lights cannot be changed and charging cannot be detected.
 
 ## How it works
 
@@ -148,7 +160,8 @@ Fn keys never reach the PC (the keyboard handles them internally), which is why 
 - The fully-charged notification fires at the configured level (100% by default). If your keyboard stops at 98 or 99%, lower that level in the settings.
 - Automatic lights off sets brightness to 0 and stores the previous value to restore it. If you raise the brightness by hand while it is active, the app respects that until the next lock or schedule.
 - The app writes to the keyboard's configuration memory. An invalid block makes the keyboard fall back to its factory lighting. Use it at your own risk.
-- Works in 2.4 GHz mode only; Bluetooth and wired modes are not covered.
+- Over Bluetooth only the battery is available (no lights, no charging detection), and the value is whatever Windows has stored, which can take a while to update.
+- After a few idle minutes the keyboard goes to sleep and stops answering; the app keeps the last reading and shows how old it is.
 
 ## Project structure
 

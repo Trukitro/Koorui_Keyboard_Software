@@ -1,6 +1,10 @@
-"""Bateria y luces del teclado KOORUI 75% (modo 2.4G) en la bandeja del sistema.
+"""Bateria y luces del teclado KOORUI 75% en la bandeja del sistema.
 
-El receptor (320F:50C3, Telink/EVision) responde por su coleccion HID
+Modo principal: 2.4G (receptor 320F:50C3). Tambien funciona por cable (320F:50C2,
+mismo protocolo) y por Bluetooth (245A:8276), donde solo hay bateria: la da el
+servicio de bateria BLE estandar y se lee de Windows.
+
+El receptor y el teclado por cable (Telink/EVision) responden por su coleccion HID
 propietaria (usage page 0xFF1C, report ID 4) con paquetes de 64 bytes:
 
     [04][suma_lo][suma_hi][cmd][len][dir_lo][dir_hi][estado][datos...]
@@ -25,11 +29,13 @@ import ctypes
 import json
 import math
 import os
+import re
 import statistics
 import sys
 import threading
 import time
 import traceback
+import uuid
 import winreg
 from ctypes import wintypes
 
@@ -43,7 +49,10 @@ from PyQt6.QtWidgets import (QApplication, QCheckBox, QColorDialog, QComboBox, Q
                              QInputDialog, QLabel, QLineEdit, QMenu, QPushButton, QSlider,
                              QSpinBox, QSystemTrayIcon, QTimeEdit, QVBoxLayout, QWidget)
 
-VID, PID = 0x320F, 0x50C3
+VID = 0x320F
+PID_WIRED, PID_DONGLE = 0x50C2, 0x50C3      # teclado por cable / receptor 2.4G
+BT_VID, BT_PID = 0x245A, 0x8276             # teclado por Bluetooth LE ("MK082-5.0")
+LINK_USB, LINK_24G, LINK_BT = "USB", "2.4G", "Bluetooth"
 USAGE_PAGE, USAGE = 0xFF1C, 0x92
 REPORT_ID = 0x04
 CMD_BEGIN, CMD_END, CMD_READ, CMD_WRITE, CMD_BATTERY = 0x01, 0x02, 0x05, 0x06, 0x1A
@@ -144,6 +153,11 @@ STR = {
     "msg_full": ("Carga completa ({}%). Ya puedes desconectar el cable.",
                  "Fully charged ({}%). You can unplug the cable."),
     "kb_title": ("Teclado KOORUI", "KOORUI keyboard"),
+    "bt_only": ("no disponible por Bluetooth", "not available over Bluetooth"),
+    "msg_bt_lights": ("Por Bluetooth solo se puede ver la bateria; las luces se cambian "
+                      "en 2.4G o por cable.",
+                      "Over Bluetooth only the battery is available; change the lights "
+                      "in 2.4G or wired mode."),
     "lock_off": ("Apagar luces al bloquear el PC", "Turn lights off when the PC is locked"),
     "sched_on": ("Apagar luces por horario", "Turn lights off on a schedule"),
     "sched_range": ("Horario de apagado", "Off hours"),
@@ -279,18 +293,74 @@ def effect_color(effect, x, y, i, t, rgb, multi, level=1.0):
 
 
 # --- acceso al teclado ----------------------------------------------------------
+class DEVPROPKEY(ctypes.Structure):
+    _fields_ = [("fmtid", ctypes.c_ubyte * 16), ("pid", ctypes.c_ulong)]
+
+
+# Propiedad donde Windows guarda el porcentaje del servicio de bateria BLE.
+BT_BATTERY_KEY = DEVPROPKEY(
+    (ctypes.c_ubyte * 16)(*uuid.UUID("104EA319-6EE2-4701-BD47-8DDBF425BBE5").bytes_le), 2)
+
+
+def bluetooth_battery(hid_path):
+    """Porcentaje de bateria que Windows conoce del teclado por Bluetooth, o None."""
+    mac = re.search(rb"_([0-9a-f]{12})[&#]", hid_path.lower())
+    if not mac:
+        return None
+    wanted = "DEV_" + mac.group(1).decode().upper()
+    cfg = ctypes.windll.cfgmgr32
+    size = ctypes.c_ulong()
+    if cfg.CM_Get_Device_ID_List_SizeW(ctypes.byref(size), "BTHLE", 1):
+        return None
+    ids = ctypes.create_unicode_buffer(size.value)
+    if cfg.CM_Get_Device_ID_ListW("BTHLE", ids, size, 1):
+        return None
+    for dev_id in ids[:size.value].split("\0"):
+        if wanted not in dev_id.upper():
+            continue
+        node = ctypes.c_ulong()
+        if cfg.CM_Locate_DevNodeW(ctypes.byref(node), dev_id, 1):
+            continue
+        kind, data, length = ctypes.c_ulong(), (ctypes.c_ubyte * 8)(), ctypes.c_ulong(8)
+        if (cfg.CM_Get_DevNode_PropertyW(node, ctypes.byref(BT_BATTERY_KEY), ctypes.byref(kind),
+                                         data, ctypes.byref(length), 0) == 0
+                and 1 <= data[0] <= 100):
+            return data[0]
+    return None
+
+
+def find_link():
+    """(enlace, ruta HID) segun como este conectado el teclado; (None, None) si no esta."""
+    def vendor_path(pid):
+        return next((d["path"] for d in hid.enumerate(VID, pid)
+                     if (d["usage_page"], d["usage"]) == (USAGE_PAGE, USAGE)), None)
+
+    # El teclado solo aparece por cable o por Bluetooth cuando esta en ese modo; el
+    # receptor 2.4G sigue enchufado siempre, asi que se mira el ultimo.
+    path = vendor_path(PID_WIRED)
+    if path:
+        return LINK_USB, path
+    bluetooth = hid.enumerate(BT_VID, BT_PID)
+    if bluetooth:
+        return LINK_BT, bluetooth[0]["path"]
+    path = vendor_path(PID_DONGLE)
+    return (LINK_24G, path) if path else (None, None)
+
+
 class Keyboard:
-    """Acceso al receptor; un solo hilo a la vez."""
+    """Acceso al teclado; un solo hilo a la vez."""
 
     def __init__(self):
         self.lock = threading.Lock()
         self.dev = None
+        self.link = None        # LINK_USB, LINK_24G, LINK_BT o None
 
     def _open(self):
-        path = next((d["path"] for d in hid.enumerate(VID, PID)
-                     if (d["usage_page"], d["usage"]) == (USAGE_PAGE, USAGE)), None)
+        self.link, path = find_link()
         if path is None:
-            raise OSError("receptor no conectado")
+            raise OSError("teclado no conectado")
+        if self.link == LINK_BT:
+            raise OSError("por Bluetooth no hay canal de configuracion")
         self.dev = hid.device()
         self.dev.open_path(path)
         self.dev.set_nonblocking(1)
@@ -334,6 +404,11 @@ class Keyboard:
         """
         with self.lock:
             try:
+                link, path = find_link()
+                if link == LINK_BT:
+                    self.link = link
+                    percent = bluetooth_battery(path)
+                    return None if percent is None else (percent, False)
                 self._open()
                 samples, charging = [], False
                 for _ in range(5):
@@ -544,6 +619,10 @@ class Model(QObject):
         return self.state.get("percent")
 
     @property
+    def link(self):
+        return self.kb.link
+
+    @property
     def charging(self):
         return bool(self.state.get("charging")) and not self.stale
 
@@ -671,6 +750,10 @@ class Model(QObject):
 
     def apply(self, changes, quiet=False):
         """Escribe cambios en el teclado. quiet: sin vista previa inmediata ni avisos."""
+        if self.link == LINK_BT:
+            if not quiet:
+                self.message.emit(tr("msg_bt_lights"))
+            return
         if self.page is not None and not quiet:     # respuesta inmediata en pantalla
             for off, value in changes.items():
                 self.page[off] = value
@@ -746,9 +829,12 @@ class Model(QObject):
             save_json(STATE_FILE, self.state)
             self._record(pct, charging, now)
             self._notify(pct, charging)
-        page = self.kb.read_page()
-        if page is not None:
-            self.page = page
+        if self.link == LINK_BT:
+            self.page = None                # por Bluetooth no se pueden leer las luces
+        else:
+            page = self.kb.read_page()
+            if page is not None:
+                self.page = page
         self.changed.emit()
 
     def _loop(self):
@@ -798,7 +884,8 @@ class BatteryView(QWidget):
         # textos
         p.setPen(QColor(TEXT))
         p.setFont(ui_font(17, QFont.Weight.DemiBold))
-        p.drawText(QRectF(0, 4, 220, 24), Qt.AlignmentFlag.AlignVCenter, "KOORUI 75% · 2.4G")
+        p.drawText(QRectF(0, 4, 220, 24), Qt.AlignmentFlag.AlignVCenter,
+                   f"KOORUI 75% · {m.link}" if m.link else "KOORUI 75%")
         p.setFont(ui_font(12))
         p.setPen(QColor(MUTED))
         p.drawText(QRectF(0, 28, self.width() - 104, 20), Qt.AlignmentFlag.AlignVCenter,
@@ -1300,7 +1387,10 @@ class Panel(QWidget):
                 slider.setValue(min(m.value(off), MAX_LEVEL))
                 slider.blockSignals(False)
                 slider.valueChanged.emit(slider.value())
-        current = m.mode_label(m.value(OFF_MODE)) if m.page is not None else tr("no_data")
+        if m.page is not None:
+            current = m.mode_label(m.value(OFF_MODE))
+        else:
+            current = tr("bt_only" if m.link == LINK_BT else "no_data")
         self.labels["light_mode"].setText(f"{tr('light_mode')}  ·  {current}")
         window = m.history_window()[1]
         self.labels["history"].setText(f"{tr('history')}  ·  {tr('last', human(window))}")

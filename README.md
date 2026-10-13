@@ -2,7 +2,7 @@
 
 [English](README.en.md) | **Español**
 
-App de bandeja para Windows que muestra la batería del teclado **KOORUI 75% inalámbrico (82 teclas, con rueda)** en modo 2.4 GHz y permite cambiar sus luces desde el PC.
+App de bandeja para Windows que muestra la batería del teclado **KOORUI 75% inalámbrico (82 teclas, con rueda)** y permite cambiar sus luces desde el PC. Pensada para el modo 2.4 GHz; también funciona por cable y, solo para la batería, por Bluetooth.
 
 El panel que se abre al hacer clic en el icono:
 
@@ -73,7 +73,7 @@ pip install -r requirements.txt
 pythonw koorui_battery.pyw
 ```
 
-En todos los casos hace falta Windows 10 u 11 y el teclado conectado con su receptor 2.4 GHz, que debe identificarse como `VID 320F / PID 50C3` ("2.4G Receiver", Telink/EVision).
+En todos los casos hace falta Windows 10 u 11 y el teclado conectado en alguno de los modos de la tabla siguiente.
 
 ## Uso
 
@@ -103,6 +103,18 @@ iscc installer\koorui.iss
 ```
 
 El resultado queda en `dist\KooruiKeyboardSetup.exe`.
+
+## Modos de conexión
+
+El modo principal es 2.4 GHz. Cable y Bluetooth funcionan como opciones; la app detecta sola en qué modo está el teclado y lo muestra junto al nombre.
+
+| Modo | Se identifica como | Batería | Carga | Luces y perfiles |
+|---|---|---|---|---|
+| **2.4 GHz** (principal) | `320F:50C3` "2.4G Receiver" | Sí | Sí | Sí |
+| Cable USB | `320F:50C2` "USB Gaming Keyboard" | Sí | Sí | Sí |
+| Bluetooth | `245A:8276` "MK082-5.0" | Sí | No | No |
+
+Por cable el teclado usa el mismo protocolo que el receptor. Por Bluetooth no existe ese canal: la batería la publica el servicio estándar de batería de Bluetooth LE y la app la lee de Windows, así que en ese modo no se pueden cambiar las luces ni saber si está cargando.
 
 ## Cómo funciona
 
@@ -148,7 +160,8 @@ Las teclas Fn nunca llegan al PC (las interpreta el propio teclado), por eso las
 - El aviso de carga completa salta al llegar al nivel configurado (100 % por defecto). Si tu teclado se queda en 98 o 99 % al terminar, baja ese nivel en los ajustes.
 - El apagado automático pone el brillo a 0 y guarda el valor anterior para restaurarlo. Si subes el brillo a mano mientras está activo, la app lo respeta hasta el siguiente bloqueo u horario.
 - La app escribe en la memoria de configuración del teclado. Un bloque inválido hace que el teclado vuelva a su iluminación de fábrica. Úsala bajo tu responsabilidad.
-- Solo funciona en modo 2.4 GHz; no cubre Bluetooth ni cable.
+- Por Bluetooth solo hay batería (sin luces ni detección de carga), y el valor es el que Windows tenga guardado, que puede tardar en actualizarse.
+- Si el teclado lleva unos minutos sin usarse entra en reposo y deja de contestar; la app conserva la última lectura y la marca con el tiempo transcurrido.
 
 ## Estructura del proyecto
 

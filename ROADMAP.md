@@ -48,7 +48,8 @@ Requieren más ingeniería inversa y tienen riesgo, porque implican escribir en 
 
 - **Color por tecla.** Los comandos `0x10`, `0x11` y `0x14` parecen relacionados, pero no están explorados.
 - **Reasignación de teclas y macros.** El comando `0x1B` devuelve lo que parece una tabla de teclas.
-- **Modo cable USB y Bluetooth**, que hoy no están cubiertos.
+- ~~Modo cable USB y Bluetooth.~~ Hecho como opciones: cable completo, Bluetooth solo batería.
+- **Luces por Bluetooth.** El teclado expone por BLE un informe propietario (página `0xFF01`, ID 5, 4 bytes) y un servicio Telink sin explorar.
 - **Otros teclados** KOORUI o con receptor Telink/EVision parecido.
 
 ## Reglas para seguir investigando
