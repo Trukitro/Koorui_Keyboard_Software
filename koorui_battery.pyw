@@ -31,15 +31,17 @@ import threading
 import time
 import traceback
 import winreg
+from ctypes import wintypes
 
 import hid
-from PyQt6.QtCore import QObject, QPointF, QRectF, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import (QAbstractNativeEventFilter, QObject, QPointF, QRectF, Qt, QTime,
+                          QTimer, pyqtSignal)
 from PyQt6.QtGui import (QAction, QColor, QCursor, QFont, QFontMetrics, QIcon, QPainter,
                          QPainterPath, QPen, QPixmap)
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QColorDialog, QComboBox, QDialog,
                              QDialogButtonBox, QFormLayout, QGridLayout, QHBoxLayout,
                              QInputDialog, QLabel, QLineEdit, QMenu, QPushButton, QSlider,
-                             QSpinBox, QSystemTrayIcon, QVBoxLayout, QWidget)
+                             QSpinBox, QSystemTrayIcon, QTimeEdit, QVBoxLayout, QWidget)
 
 VID, PID = 0x320F, 0x50C3
 USAGE_PAGE, USAGE = 0xFF1C, 0x92
@@ -64,6 +66,7 @@ MODES_FILE = os.path.join(DATA_DIR, "modes.json")
 PROFILES_FILE = os.path.join(DATA_DIR, "profiles.json")
 HISTORY_FILE = os.path.join(DATA_DIR, "history.json")
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
+AUTO_FILE = os.path.join(DATA_DIR, "auto.json")
 LOG_FILE = os.path.join(DATA_DIR, "error.log")
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 
@@ -77,7 +80,9 @@ GREEN, BLUE = "#3fbf7f", "#2878d7"
 
 # Ajustes del usuario (se cargan de settings.json al arrancar).
 DEFAULTS = {"lang": "es", "poll": 30, "low": 20, "critical": 10,
-            "full_notify": True, "full_level": 100}
+            "full_notify": True, "full_level": 100,
+            "lock_off": False, "sched_on": False, "sched_from": "23:00", "sched_to": "07:00"}
+AUTO_SETTLE = 10                # segundos de margen tras una escritura automatica
 CFG = dict(DEFAULTS)
 
 # Textos de la interfaz: clave -> (espanol, ingles).
@@ -139,6 +144,9 @@ STR = {
     "msg_full": ("Carga completa ({}%). Ya puedes desconectar el cable.",
                  "Fully charged ({}%). You can unplug the cable."),
     "kb_title": ("Teclado KOORUI", "KOORUI keyboard"),
+    "lock_off": ("Apagar luces al bloquear el PC", "Turn lights off when the PC is locked"),
+    "sched_on": ("Apagar luces por horario", "Turn lights off on a schedule"),
+    "sched_range": ("Horario de apagado", "Off hours"),
 }
 
 
@@ -419,6 +427,17 @@ def human(seconds):
     return f"{max(1, round(seconds / 60))} min"
 
 
+def in_schedule(now=None):
+    """True dentro del horario de apagado de luces (puede cruzar la medianoche)."""
+    if not CFG["sched_on"]:
+        return False
+    clock = time.strftime("%H:%M", time.localtime(now))
+    start, end = CFG["sched_from"], CFG["sched_to"]
+    if start <= end:
+        return start <= clock < end
+    return clock >= start or clock < end
+
+
 def battery_color(percent, stale=False, charging=False):
     if percent is None:
         return QColor(110, 110, 110)
@@ -501,6 +520,10 @@ class Model(QObject):
         self.page = None
         self.started = time.time()
         self.warned = set()
+        self.locked = False                 # sesion de Windows bloqueada
+        self.auto = load_json(AUTO_FILE)    # apagado automatico: activo y brillo a restaurar
+        self.overridden = False             # el usuario encendio las luces durante el apagado
+        self.auto_write = 0.0
         self.wake = threading.Event()
         threading.Thread(target=self._loop, daemon=True).start()
 
@@ -646,8 +669,9 @@ class Model(QObject):
     def refresh(self):
         self.wake.set()
 
-    def apply(self, changes):
-        if self.page is not None:           # respuesta inmediata en pantalla
+    def apply(self, changes, quiet=False):
+        """Escribe cambios en el teclado. quiet: sin vista previa inmediata ni avisos."""
+        if self.page is not None and not quiet:     # respuesta inmediata en pantalla
             for off, value in changes.items():
                 self.page[off] = value
             self.changed.emit()
@@ -655,13 +679,46 @@ class Model(QObject):
         def work():
             page = self.kb.update_page(changes)
             if page is None:
-                self.message.emit(tr("msg_no_reply"))
+                if not quiet:
+                    self.message.emit(tr("msg_no_reply"))
             else:
                 self.page = page
-                if any(page[off] != value for off, value in changes.items()):
+                if not quiet and any(page[off] != value for off, value in changes.items()):
                     self.message.emit(tr("msg_rejected"))
             self.changed.emit()
         threading.Thread(target=work, daemon=True).start()
+
+    # --- apagado automatico de luces --------------------------------------
+    def _set_auto(self, active, saved=None):
+        self.auto = {"active": active, "saved": self.auto.get("saved", MAX_LEVEL)
+                     if saved is None else saved}
+        save_json(AUTO_FILE, self.auto)
+
+    def _auto_write(self, bright):
+        self.auto_write = time.time()
+        self.apply({OFF_BRIGHT: bright}, quiet=True)
+
+    def auto_tick(self):
+        """Pone el brillo a 0 al bloquear el PC o en horario y lo restaura despues."""
+        if self.page is None:
+            return
+        want_off = (CFG["lock_off"] and self.locked) or in_schedule()
+        bright = self.page[OFF_BRIGHT]
+        settled = time.time() - self.auto_write > AUTO_SETTLE
+        active = self.auto.get("active", False)
+        if not want_off:
+            self.overridden = False
+            if active and bright > 0:
+                self._set_auto(False)
+            elif active and settled:        # reintenta hasta que el teclado responda
+                self._auto_write(self.auto.get("saved", MAX_LEVEL))
+        elif active:
+            if bright > 0 and settled:      # las encendieron a mano: respetarlo
+                self.overridden = True
+                self._set_auto(False)
+        elif bright > 0 and not self.overridden:
+            self._set_auto(True, bright)
+            self._auto_write(0)
 
     def _notify(self, pct, charging):
         if charging:
@@ -1050,6 +1107,17 @@ class SettingsDialog(QDialog):
         self.full_notify = QCheckBox()
         self.full_notify.setChecked(CFG["full_notify"])
         self.full_level = self.spin(80, 100, CFG["full_level"], " %")
+        self.lock_off = QCheckBox()
+        self.lock_off.setChecked(CFG["lock_off"])
+        self.sched_on = QCheckBox()
+        self.sched_on.setChecked(CFG["sched_on"])
+        self.sched_from = self.clock(CFG["sched_from"])
+        self.sched_to = self.clock(CFG["sched_to"])
+        hours = QHBoxLayout()
+        hours.addWidget(self.sched_from)
+        hours.addWidget(QLabel("-"))
+        hours.addWidget(self.sched_to)
+        hours.addStretch()
         form = QFormLayout(self)
         form.setVerticalSpacing(10)
         form.addRow(tr("language"), self.lang)
@@ -1058,6 +1126,9 @@ class SettingsDialog(QDialog):
         form.addRow(tr("critical"), self.critical)
         form.addRow(tr("full_notify"), self.full_notify)
         form.addRow(tr("full_level"), self.full_level)
+        form.addRow(tr("lock_off"), self.lock_off)
+        form.addRow(tr("sched_on"), self.sched_on)
+        form.addRow(tr("sched_range"), hours)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
                                    | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
@@ -1073,12 +1144,21 @@ class SettingsDialog(QDialog):
         box.setSuffix(suffix)
         return box
 
+    @staticmethod
+    def clock(text):
+        edit = QTimeEdit(QTime.fromString(text, "HH:mm"))
+        edit.setDisplayFormat("HH:mm")
+        return edit
+
     def values(self):
         low = self.low.value()
         return {"lang": self.lang.currentData(), "poll": self.poll.value(), "low": low,
                 "critical": min(self.critical.value(), low),
                 "full_notify": self.full_notify.isChecked(),
-                "full_level": self.full_level.value()}
+                "full_level": self.full_level.value(),
+                "lock_off": self.lock_off.isChecked(), "sched_on": self.sched_on.isChecked(),
+                "sched_from": self.sched_from.time().toString("HH:mm"),
+                "sched_to": self.sched_to.time().toString("HH:mm")}
 
 
 class Panel(QWidget):
@@ -1379,6 +1459,27 @@ class Tray(QSystemTrayIcon):
         self.setToolTip(f"KOORUI · {tr('battery')} {m.battery_text()}\n{tr('lights')}: {lights}")
 
 
+class LockWatcher(QAbstractNativeEventFilter):
+    """Avisa al modelo cuando la sesion de Windows se bloquea o desbloquea."""
+
+    WM_WTSSESSION_CHANGE, WTS_SESSION_LOCK, WTS_SESSION_UNLOCK = 0x02B1, 7, 8
+
+    def __init__(self, model, hwnd):
+        super().__init__()
+        self.model = model
+        ctypes.windll.wtsapi32.WTSRegisterSessionNotification(wintypes.HWND(hwnd), 0)
+
+    def nativeEventFilter(self, event_type, message):
+        if bytes(event_type) == b"windows_generic_MSG":
+            msg = wintypes.MSG.from_address(int(message))
+            if msg.message == self.WM_WTSSESSION_CHANGE:
+                if msg.wParam == self.WTS_SESSION_LOCK:
+                    self.model.locked = True
+                elif msg.wParam == self.WTS_SESSION_UNLOCK:
+                    self.model.locked = False
+        return False, 0
+
+
 def main():
     # Una sola instancia.
     mutex = ctypes.windll.kernel32.CreateMutexW(None, False, APP_NAME + "Mutex")
@@ -1390,7 +1491,7 @@ def main():
              "border-radius:6px;padding:5px;")
     app.setStyleSheet(
         f"QDialog{{background:{BG};}} QLabel,QCheckBox{{color:{TEXT};}}"
-        f"QLineEdit,QComboBox,QSpinBox{{{field}}}"
+        f"QLineEdit,QComboBox,QSpinBox,QTimeEdit{{{field}}}"
         f"QComboBox QAbstractItemView{{background:{CARD};color:{TEXT};"
         f"selection-background-color:{ACCENT};}}"
         f"QPushButton{{background:{CARD};color:{TEXT};border:1px solid {BORDER};"
@@ -1403,6 +1504,11 @@ def main():
     panel = Panel(model)
     tray = Tray(model, panel)
     tray.show()
+    watcher = LockWatcher(model, int(panel.winId()))
+    app.installNativeEventFilter(watcher)
+    auto = QTimer()
+    auto.timeout.connect(model.auto_tick)
+    auto.start(2000)
     if "--shot" in sys.argv:        # captura del panel para revisar el diseno
         path = sys.argv[sys.argv.index("--shot") + 1]
         panel.busy = True

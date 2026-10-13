@@ -1,5 +1,7 @@
 # Koorui Keyboard Software
 
+[English](README.en.md) | **Español**
+
 App de bandeja para Windows que muestra la batería del teclado **KOORUI 75% inalámbrico (82 teclas, con rueda)** en modo 2.4 GHz y permite cambiar sus luces desde el PC.
 
 El panel que se abre al hacer clic en el icono:
@@ -34,7 +36,8 @@ KOORUI no publica software para este teclado y, en modo 2.4 GHz, no hay forma de
 - **Avisos**: batería baja, batería crítica y carga completa, con umbrales configurables.
 - **Luces**: los 18 modos con miniatura animada, color (nueve predefinidos, multicolor o cualquier otro), brillo y velocidad.
 - **Perfiles de luces**: guarda combinaciones de modo, color, brillo y velocidad con nombre y aplícalas con un clic, desde el panel o desde el menú del icono.
-- **Ajustes**: idioma (español o inglés), intervalo de consulta y umbrales de aviso.
+- **Apagado automático de luces**: al bloquear el PC y/o en un horario (por ejemplo de 23:00 a 07:00). Al desbloquear o terminar el horario vuelve el brillo que tenías. Ahorra batería.
+- **Ajustes**: idioma (español o inglés), intervalo de consulta, umbrales de aviso y apagado automático.
 - Detecta los cambios hechos con las teclas Fn del teclado y puede iniciarse con Windows.
 
 Ventana de ajustes (botón del engranaje o clic derecho en el icono):
@@ -43,14 +46,23 @@ Ventana de ajustes (botón del engranaje o clic derecho en el icono):
 
 ## Instalación
 
-### Opción 1: ejecutable (no necesita Python)
+Ninguna de las dos primeras opciones necesita Python. Los archivos están en la [última versión publicada](https://github.com/Trukitro/Koorui_Keyboard_Software/releases/latest).
 
-1. Descarga `KooruiKeyboard.exe` desde la [última versión publicada](https://github.com/Trukitro/Koorui_Keyboard_Software/releases/latest).
+### Opción 1: instalador (recomendada, desde la v1.3.0)
+
+1. Descarga `KooruiKeyboardSetup.exe` y ábrelo.
+2. Sigue el asistente. Puedes marcar "Iniciar con Windows".
+
+Se instala solo para tu usuario (no pide permisos de administrador), crea un acceso en el menú Inicio y se desinstala desde "Aplicaciones instaladas" de Windows.
+
+### Opción 2: ejecutable portable
+
+1. Descarga `KooruiKeyboard.exe`.
 2. Guárdalo en una carpeta fija (por ejemplo `Documentos\Koorui`) y ábrelo con doble clic.
 
-Windows puede mostrar el aviso de SmartScreen porque el ejecutable no está firmado: pulsa "Más información" y luego "Ejecutar de todas formas".
+En ambos casos Windows puede mostrar el aviso de SmartScreen porque los archivos no están firmados: pulsa "Más información" y luego "Ejecutar de todas formas".
 
-### Opción 2: desde el código
+### Opción 3: desde el código
 
 Requiere Python 3.10 o posterior.
 
@@ -61,12 +73,12 @@ pip install -r requirements.txt
 pythonw koorui_battery.pyw
 ```
 
-En ambos casos hace falta Windows 10 u 11 y el teclado conectado con su receptor 2.4 GHz, que debe identificarse como `VID 320F / PID 50C3` ("2.4G Receiver", Telink/EVision).
+En todos los casos hace falta Windows 10 u 11 y el teclado conectado con su receptor 2.4 GHz, que debe identificarse como `VID 320F / PID 50C3` ("2.4G Receiver", Telink/EVision).
 
 ## Uso
 
 - **Clic izquierdo** en el icono: abre o cierra el panel.
-- **Clic derecho** en el icono: actualizar ahora, iniciar con Windows, salir.
+- **Clic derecho** en el icono: perfiles, actualizar ahora, ajustes, iniciar con Windows, salir.
 - **Clic** en un modo: lo activa en el teclado.
 - **Clic derecho** en un modo: cambia su nombre y la animación con la que se representa.
 - **"+ Guardar actual"**: guarda las luces de ese momento como perfil.
@@ -83,6 +95,14 @@ pyinstaller --onefile --noconsole --name KooruiKeyboard --icon assets/icon.ico k
 ```
 
 El resultado queda en `dist\KooruiKeyboard.exe`. Si tienes PySide6 instalado además de PyQt6, añade `--exclude-module PySide6`.
+
+Para generar el instalador hace falta [Inno Setup 6](https://jrsoftware.org/isinfo.php):
+
+```bash
+iscc installer\koorui.iss
+```
+
+El resultado queda en `dist\KooruiKeyboardSetup.exe`.
 
 ## Cómo funciona
 
@@ -126,6 +146,7 @@ Las teclas Fn nunca llegan al PC (las interpreta el propio teclado), por eso las
 - Las animaciones del panel son aproximaciones, no una copia exacta de los efectos del teclado.
 - El tiempo restante es una estimación a partir del tramo de descarga actual; necesita al menos media hora de lecturas y una caída de 3 puntos, y cambia según el uso y el brillo.
 - El aviso de carga completa salta al llegar al nivel configurado (100 % por defecto). Si tu teclado se queda en 98 o 99 % al terminar, baja ese nivel en los ajustes.
+- El apagado automático pone el brillo a 0 y guarda el valor anterior para restaurarlo. Si subes el brillo a mano mientras está activo, la app lo respeta hasta el siguiente bloqueo u horario.
 - La app escribe en la memoria de configuración del teclado. Un bloque inválido hace que el teclado vuelva a su iluminación de fábrica. Úsala bajo tu responsabilidad.
 - Solo funciona en modo 2.4 GHz; no cubre Bluetooth ni cable.
 
@@ -137,6 +158,7 @@ Las teclas Fn nunca llegan al PC (las interpreta el propio teclado), por eso las
 | `snapshot.py` | Herramienta de solo lectura para investigar la configuración |
 | `requirements.txt` | Dependencias |
 | `assets/icon.ico` | Icono del ejecutable |
+| `installer/koorui.iss` | Guion de Inno Setup para el instalador |
 
 ## Plan a futuro
 

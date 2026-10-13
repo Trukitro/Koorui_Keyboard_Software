@@ -1,6 +1,6 @@
 # Plan a futuro
 
-Estado actual: **v1.2.0**. Batería con detección de carga, historial y estimación, avisos configurables, perfiles de luces, ajustes con idioma, ejecutable para Windows.
+Estado actual: **v1.3.0**. Batería con detección de carga, historial y estimación, avisos configurables, perfiles de luces, apagado automático, ajustes con idioma, instalador para Windows.
 
 El plan está ordenado por prioridad. Primero va confirmar lo que hoy son suposiciones, porque varias funciones futuras dependen de ello.
 
@@ -28,16 +28,17 @@ Ya validado en el teclado real: batería (descarga y carga), los 18 modos, brill
 - ~~Perfiles.~~ Hecho en v1.2.0.
 - **Atajos globales** de Windows para cambiar de perfil sin abrir el panel.
 - **Perfil por aplicación**: cambiar las luces según el programa en primer plano.
-- **Apagado automático** por horario o al bloquear el PC.
+- ~~Apagado automático por horario o al bloquear el PC.~~ Hecho en v1.3.0.
 - **Animaciones más fieles** a los efectos reales, una vez confirmados los 18 modos.
 
 ## 4. Aplicación
 
 - ~~Ventana de ajustes e interfaz en inglés.~~ Hecho en v1.2.0.
-- **README en inglés**, ya que el repositorio es público.
-- **Instalador** con acceso directo y desinstalación, en lugar de un `.exe` suelto.
+- ~~README en inglés.~~ Hecho en v1.3.0.
+- ~~Instalador con acceso directo y desinstalación.~~ Hecho en v1.3.0.
+- **Firmar el ejecutable y el instalador**, para que Windows SmartScreen no avise.
 - **Ejecutable más pequeño y rápido de abrir** (hoy 36 MB), quitando módulos de Qt que no se usan.
-- **Compilación automática** del `.exe` con GitHub Actions al publicar una versión.
+- **Compilación automática** del `.exe` y del instalador con GitHub Actions al publicar una versión.
 - **Aviso de versión nueva** dentro de la app.
 - **Pruebas automáticas** con un receptor simulado, para poder cambiar el protocolo sin riesgo.
 
