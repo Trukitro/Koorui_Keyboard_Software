@@ -157,7 +157,7 @@ Las teclas Fn nunca llegan al PC (las interpreta el propio teclado), por eso las
 - Los nombres de los modos vienen de la tabla habitual de los teclados EVision; si alguno no describe bien el efecto, se cambia con clic derecho.
 - Las animaciones del panel son aproximaciones, no una copia exacta de los efectos del teclado.
 - El tiempo restante es una estimación a partir del tramo de descarga actual; necesita al menos media hora de lecturas y una caída de 3 puntos, y cambia según el uso y el brillo.
-- El aviso de carga completa salta al llegar al nivel configurado (100 % por defecto). Si tu teclado se queda en 98 o 99 % al terminar, baja ese nivel en los ajustes.
+- El aviso de carga completa salta al llegar al nivel configurado (100 % por defecto, que es donde termina de cargar el teclado del autor).
 - El apagado automático pone el brillo a 0 y guarda el valor anterior para restaurarlo. Si subes el brillo a mano mientras está activo, la app lo respeta hasta el siguiente bloqueo u horario.
 - La app escribe en la memoria de configuración del teclado. Un bloque inválido hace que el teclado vuelva a su iluminación de fábrica. Úsala bajo tu responsabilidad.
 - Por Bluetooth solo hay batería (sin luces ni detección de carga), y el valor es el que Windows tenga guardado, que puede tardar en actualizarse.

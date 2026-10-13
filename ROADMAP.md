@@ -1,6 +1,6 @@
 # Plan a futuro
 
-Estado actual: **v1.3.0**. Batería con detección de carga, historial y estimación, avisos configurables, perfiles de luces, apagado automático, ajustes con idioma, instalador para Windows.
+Estado actual: **v1.4.0**. Batería con detección de carga, historial y estimación, avisos configurables, perfiles de luces, apagado automático, ajustes con idioma, instalador para Windows, y modos cable y Bluetooth como opciones.
 
 El plan está ordenado por prioridad. Primero va confirmar lo que hoy son suposiciones, porque varias funciones futuras dependen de ello.
 
@@ -19,7 +19,6 @@ Ya validado en el teclado real: batería (descarga y carga), los 18 modos, brill
 - ~~Detectar si está cargando.~~ Hecho: el byte 9 de la respuesta de `0x1A` vale 1 con el cable conectado.
 - ~~Aviso de carga completa.~~ Hecho en v1.2.0.
 - ~~Historial y estimación.~~ Hecho en v1.2.0: gráfica de hasta 7 días y tiempo restante aproximado.
-- **Confirmar a qué porcentaje deja de cargar** el teclado, para ajustar el nivel por defecto del aviso de carga completa.
 - **Actualizar al usar el teclado** en lugar de cada 30 segundos fijos, y dejar de consultar cuando lleva rato inactivo.
 - ~~Umbral de aviso configurable y aviso crítico.~~ Hecho en v1.2.0.
 
@@ -48,7 +47,7 @@ Requieren más ingeniería inversa y tienen riesgo, porque implican escribir en 
 
 - **Color por tecla.** Los comandos `0x10`, `0x11` y `0x14` parecen relacionados, pero no están explorados.
 - **Reasignación de teclas y macros.** El comando `0x1B` devuelve lo que parece una tabla de teclas.
-- ~~Modo cable USB y Bluetooth.~~ Hecho como opciones: cable completo, Bluetooth solo batería.
+- ~~Modo cable USB y Bluetooth.~~ Hecho en v1.4.0 como opciones: cable completo, Bluetooth solo batería.
 - **Luces por Bluetooth.** El teclado expone por BLE un informe propietario (página `0xFF01`, ID 5, 4 bytes) y un servicio Telink sin explorar.
 - **Otros teclados** KOORUI o con receptor Telink/EVision parecido.
 

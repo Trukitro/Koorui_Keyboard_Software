@@ -3,7 +3,7 @@
 ; Requiere haber generado antes dist\KooruiKeyboard.exe con PyInstaller.
 
 #define AppName "Koorui Keyboard"
-#define AppVersion "1.3.0"
+#define AppVersion "1.4.0"
 #define AppExe "KooruiKeyboard.exe"
 
 [Setup]

@@ -157,7 +157,7 @@ Fn keys never reach the PC (the keyboard handles them internally), which is why 
 - Mode names come from the usual EVision keyboard table; if one does not describe the effect well, change it with a right-click.
 - The panel animations are approximations, not an exact copy of the keyboard's effects.
 - Time left is an estimate based on the current discharge run; it needs at least half an hour of readings and a 3-point drop, and it varies with usage and brightness.
-- The fully-charged notification fires at the configured level (100% by default). If your keyboard stops at 98 or 99%, lower that level in the settings.
+- The fully-charged notification fires at the configured level (100% by default, which is where the author's keyboard finishes charging).
 - Automatic lights off sets brightness to 0 and stores the previous value to restore it. If you raise the brightness by hand while it is active, the app respects that until the next lock or schedule.
 - The app writes to the keyboard's configuration memory. An invalid block makes the keyboard fall back to its factory lighting. Use it at your own risk.
 - Over Bluetooth only the battery is available (no lights, no charging detection), and the value is whatever Windows has stored, which can take a while to update.

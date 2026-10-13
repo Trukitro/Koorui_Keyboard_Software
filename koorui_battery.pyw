@@ -1003,6 +1003,8 @@ class ModeTile(QWidget):
         m = self.model
         selected = m.value(OFF_MODE) == self.mode
         name, effect = m.mode_info(self.mode)
+        if m.page is None:              # sin luces (Bluetooth o sin datos): miniatura apagada
+            effect = ""
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setPen(QPen(QColor(ACCENT if selected else BORDER), 2 if selected else 1))
