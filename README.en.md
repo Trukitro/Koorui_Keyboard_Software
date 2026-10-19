@@ -39,7 +39,9 @@ KOORUI does not publish software for this keyboard and, in 2.4 GHz mode, there i
 - **Automatic lights off**: when the PC is locked and/or on a schedule (for example 23:00 to 07:00). On unlock or when the schedule ends, your previous brightness comes back. Saves battery.
 - **Report**: forecast of when to charge, battery life by brightness, monthly battery wear, charging statistics, keyboard use by hour and a key heatmap (optional). It can be exported to CSV or to an HTML report.
 - **Smart polling**: while you type it checks every 30 s; when idle it drops to every 5 min and reads again as soon as you press a key.
-- **New version notice**: once a day it checks GitHub for a newer published version and shows a tray notification (can be turned off).
+- **Version and updates**: the panel footer shows the installed version and a button to check for updates. If there is a newer one, "Update to vX.Y.Z" downloads the installer, verifies its SHA-256 checksum and installs it silently; the app reopens by itself. It also checks once a day and shows a tray notification. Installing automatically without asking is optional in the settings.
+- **Usage notifications**: a forecast notice when you will reach the low-battery threshold within a day ("you will reach 20% tomorrow around 10:00"), and a break reminder after typing non-stop for a while (60 min by default).
+- **Backup**: export and import profiles, mode names, settings, history, usage and key counts to a file, from the settings.
 - **Settings**: language (English or Spanish), polling interval, notification thresholds and automatic lights off.
 - Picks up changes made with the keyboard's Fn keys and can start with Windows.
 
@@ -61,6 +63,7 @@ What the report shows:
 - **Charging**: last charge, charges per week, average time between charges and how long a 0 to 100% charge takes, plus the last five charges.
 - **Keyboard use**: minutes of use today, the average on days you use it and a chart of use by hour of day.
 - **Heatmap** (optional, off by default): the keyboard colored by how often you press each key over the last 30 days, and the most used keys.
+- **Typing** (with the heatmap on): key presses per day over the last two weeks, daily average, presses per minute of use and the trend against the previous week.
 - **Export**: the reading history as CSV (opens in Excel) or an HTML report with all of the above.
 
 ### Privacy
@@ -70,7 +73,7 @@ To know when you use the keyboard, the app receives key press notifications from
 - Without the heatmap, it only uses the minute each press happened in, to add up minutes of use.
 - With the heatmap on, it also adds one to that key's daily counter. It never stores what you type or in what order.
 - Turning the heatmap off deletes the counters.
-- Everything stays on your PC. The only internet connection is the daily version check against GitHub, which can be turned off in the settings.
+- Everything stays on your PC. The only internet connections are to GitHub: the daily version check (can be turned off in the settings) and downloading the installer when you update.
 
 ## Installation
 
@@ -117,7 +120,7 @@ Profiles, mode names, battery history (90 days), settings and the error log are 
 
 ## Publishing a version
 
-When a version is published on GitHub, the [`Compilar`](.github/workflows/release.yml) action builds the executable and the installer on Windows and attaches them to that version. Bump `APP_VERSION` in `koorui_battery.pyw` to the same number as the tag first, so the new version notice works:
+When a version is published on GitHub, the [`Compilar`](.github/workflows/release.yml) action builds the executable and the installer on Windows and attaches them to that version. It also publishes `SHA256SUMS.txt` with each file's checksum; the app refuses to install an update whose checksum does not match. Before publishing, bump `APP_VERSION` in `koorui_battery.pyw` to the same number as the tag:
 
 ```bash
 gh release create v1.6.0 --title "v1.6.0" --notes "What's new..."
@@ -195,6 +198,7 @@ Fn keys never reach the PC (the keyboard handles them internally), which is why 
 - Mode names come from the usual EVision keyboard table; if one does not describe the effect well, change it with a right-click.
 - The panel animations are approximations, not an exact copy of the keyboard's effects.
 - Use by hour and the heatmap start counting from v1.6.0, and only while the app is running.
+- Updating from the app works from v1.7.0 on (earlier versions do not publish the SHA-256 checksum) and leaves the app installed through the installer; if you used the portable executable, the installed version is used from then on.
 - The report needs data: battery life for a brightness level appears after 2 h of use at that level with a 3-point drop, and charging statistics after a few days. Readings stored before v1.5.0 do not include brightness, so they do not count towards battery life.
 - Time left is an estimate based on the current discharge run; it needs at least half an hour of readings and a 3-point drop, and it varies with usage and brightness.
 - The fully-charged notification fires at the configured level (100% by default, which is where the author's keyboard finishes charging).

@@ -27,13 +27,16 @@ Requiere: pip install -r requirements.txt
 import colorsys
 import csv
 import ctypes
+import hashlib
 import html
 import json
 import math
 import os
 import re
 import statistics
+import subprocess
 import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -49,7 +52,8 @@ from PyQt6.QtGui import (QAction, QColor, QCursor, QDesktopServices, QFont, QFon
                          QIcon, QPainter, QPainterPath, QPen, QPixmap)
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QColorDialog, QComboBox, QDialog,
                              QDialogButtonBox, QFileDialog, QFormLayout, QGridLayout, QHBoxLayout,
-                             QInputDialog, QLabel, QLineEdit, QMenu, QPushButton, QScrollArea,
+                             QInputDialog, QLabel, QLineEdit, QMenu, QMessageBox, QPushButton,
+                             QScrollArea,
                              QSlider,
                              QSpinBox, QStackedWidget, QSystemTrayIcon, QTimeEdit,
                              QVBoxLayout, QWidget)
@@ -96,7 +100,10 @@ IDLE_POLL = 5 * 60              # intervalo de consulta mientras esta en reposo
 ACTIVITY_KEEP = 90             # dias de uso y pulsaciones que se conservan
 HEAT_DAYS = 30                 # dias que suma el mapa de calor
 
-APP_VERSION = "1.6.0"
+APP_VERSION = "1.7.0"
+FROZEN = getattr(sys, "frozen", False)  # ejecutable empaquetado (no desde el codigo)
+SETUP_NAME, SUMS_NAME = "KooruiKeyboardSetup.exe", "SHA256SUMS.txt"
+BREAK_GAP = 5 * 60              # una parada mas larga cuenta como pausa
 REPO = "Trukitro/Koorui_Keyboard_Software"
 UPDATE_EVERY = DAY
 
@@ -107,7 +114,8 @@ GREEN, BLUE = "#3fbf7f", "#2878d7"
 DEFAULTS = {"lang": "es", "poll": 30, "low": 20, "critical": 10,
             "full_notify": True, "full_level": 100,
             "lock_off": False, "sched_on": False, "sched_from": "23:00", "sched_to": "07:00",
-            "heatmap": False, "check_updates": True}
+            "heatmap": False, "check_updates": True, "auto_update": False,
+            "forecast_notify": True, "break_minutes": 60}
 AUTO_SETTLE = 10                # segundos de margen tras una escritura automatica
 CFG = dict(DEFAULTS)
 
@@ -199,9 +207,53 @@ STR = {
     "rep_export_csv": ("Exportar CSV", "Export CSV"),
     "rep_export_html": ("Exportar informe HTML", "Export HTML report"),
     "msg_exported": ("Guardado en {}", "Saved to {}"),
-    "msg_update": ("Hay una versión nueva: {}. Haz clic para descargarla.",
-                   "A new version is available: {}. Click to download it."),
-    "download_update": ("Descargar versión {}", "Download version {}"),
+    "msg_update": ("Hay una versión nueva: {}. Haz clic para verla en el panel.",
+                   "A new version is available: {}. Click to see it in the panel."),
+    "download_update": ("Actualizar a la versión {}", "Update to version {}"),
+    "check_now": ("Buscar actualizaciones", "Check for updates"),
+    "checking": ("Buscando…", "Checking…"),
+    "up_to_date": ("Estás al día", "You're up to date"),
+    "update_to": ("Actualizar a {}", "Update to {}"),
+    "downloading": ("Descargando {}…", "Downloading {}…"),
+    "installing": ("Instalando {}…", "Installing {}…"),
+    "update_failed": ("No se pudo actualizar: {}", "Update failed: {}"),
+    "update_no_asset": ("la versión no incluye el instalador",
+                        "the release does not include the installer"),
+    "update_no_hash": ("la versión no publica su huella SHA-256",
+                       "the release does not publish its SHA-256 checksum"),
+    "update_bad_hash": ("la huella del archivo descargado no coincide",
+                        "the downloaded file's checksum does not match"),
+    "update_source": ("Desde el código: actualiza con git pull", "From source: update with git pull"),
+    "check_failed": ("Sin conexión con GitHub", "Could not reach GitHub"),
+    "auto_update": ("Instalar actualizaciones automáticamente", "Install updates automatically"),
+    "forecast_notify": ("Avisar antes de quedarse sin batería", "Warn before the battery runs low"),
+    "msg_forecast": ("Al ritmo actual llegarás al {}% {}. Conviene cargarlo antes.",
+                     "At the current rate you will reach {}% {}. Charge it before then."),
+    "at_today": ("hoy hacia las {}", "today around {}"),
+    "at_tomorrow": ("mañana hacia las {}", "tomorrow around {}"),
+    "break_minutes": ("Recordar una pausa tras (0 = no)",
+                      "Remind me to take a break after (0 = off)"),
+    "msg_break": ("Llevas {} escribiendo sin parar. Buen momento para una pausa.",
+                  "You have been typing for {} without a break. Good time to rest."),
+    "backup": ("Copia de seguridad", "Backup"),
+    "backup_export": ("Exportar…", "Export…"),
+    "backup_import": ("Importar…", "Import…"),
+    "backup_confirm": ("Esto reemplaza perfiles, nombres de modos, ajustes e historial por los "
+                       "de la copia. ¿Continuar?",
+                       "This replaces profiles, mode names, settings and history with the "
+                       "backup's. Continue?"),
+    "backup_invalid": ("El archivo no es una copia de seguridad de esta app.",
+                       "The file is not a backup from this app."),
+    "msg_backup_saved": ("Copia guardada en {}", "Backup saved to {}"),
+    "msg_backup_loaded": ("Copia de seguridad restaurada", "Backup restored"),
+    "rep_typing": ("ESCRITURA", "TYPING"),
+    "rep_typing_off": ("Activa el mapa de calor en Ajustes para ver las pulsaciones por día.",
+                       "Turn on the heatmap in Settings to see key presses per day."),
+    "rep_typing_avg": ("Media: {} pulsaciones al día · {} por minuto de uso",
+                       "Average: {} key presses a day · {} per minute of use"),
+    "rep_typing_trend": ("Últimos 7 días frente a los 7 anteriores: {}",
+                         "Last 7 days vs the previous 7: {}"),
+    "rep_typing_days": ("Pulsaciones por día (14 días)", "Key presses per day (14 days)"),
     "html_title": ("Informe del teclado KOORUI", "KOORUI keyboard report"),
     "html_generated": ("Generado el {}", "Generated on {}"),
     "html_history": ("Historial completo de lecturas: exporta el CSV desde la app.",
@@ -750,6 +802,27 @@ def wear_by_month(history):
     return bright, months
 
 
+def typing_stats(keys, usage, now=None):
+    """Pulsaciones por dia (14 dias), media, ritmo por minuto de uso y tendencia semanal."""
+    now = time.time() if now is None else now
+    days = [day_key(now - n * DAY) for n in range(13, -1, -1)]
+    per_day = [sum(keys.get(d, [])) for d in days]
+    previous, last = per_day[:7], per_day[7:]
+    used = [v for v in last if v]
+    minutes = sum(sum(usage.get(d, [])) for d, v in zip(days[7:], last) if v)
+    return {"days": days, "per_day": per_day,
+            "avg": sum(used) / len(used) if used else 0,
+            "rate": sum(last) / minutes if minutes else 0,
+            "trend": (sum(last) - sum(previous)) / sum(previous) * 100 if sum(previous) else None}
+
+
+def when_text(ts, now=None):
+    """'hoy hacia las 15:00' o 'manana hacia las 10:00'."""
+    now = time.time() if now is None else now
+    clock = time.strftime("%H:%M", time.localtime(ts))
+    return tr("at_today" if day_key(ts) == day_key(now) else "at_tomorrow", clock)
+
+
 def short_count(n):
     return f"{n / 1000:.1f}k" if n >= 1000 else str(round(n))
 
@@ -845,6 +918,7 @@ class Model(QObject):
     profiles_changed = pyqtSignal()
     settings_changed = pyqtSignal()
     update_found = pyqtSignal(str, str)     # version, enlace
+    update_status = pyqtSignal(str)         # progreso de la busqueda o instalacion
 
     def __init__(self):
         super().__init__()
@@ -870,7 +944,9 @@ class Model(QObject):
         self.last_minute = 0
         self.last_poll = 0.0
         self.pressed = set()
-        self.update = None                  # (version, enlace) si hay una version nueva
+        self.update = None                  # (version, enlace, datos) si hay una version nueva
+        self.session_start = 0.0            # inicio de la racha de escritura actual
+        self.break_warned = False
         self.wake = threading.Event()
         threading.Thread(target=self._loop, daemon=True).start()
         threading.Thread(target=self._update_loop, daemon=True).start()
@@ -1093,7 +1169,7 @@ class Model(QObject):
 
     def _notify(self, pct, charging):
         if charging:
-            self.warned -= {"low", "critical"}
+            self.warned -= {"low", "critical", "forecast"}
             if CFG["full_notify"] and pct >= CFG["full_level"] and "full" not in self.warned:
                 self.warned.add("full")
                 self.message.emit(tr("msg_full", pct))
@@ -1107,6 +1183,13 @@ class Model(QObject):
         elif pct <= CFG["low"] and "low" not in self.warned:
             self.warned.add("low")
             self.message.emit(tr("msg_low", pct))
+        rate = self.discharge_rate()
+        if (CFG["forecast_notify"] and rate and pct > CFG["low"]
+                and "forecast" not in self.warned):
+            when = time.time() + (pct - CFG["low"]) / rate
+            if when - time.time() < DAY:        # llegara al umbral en menos de un dia
+                self.warned.add("forecast")
+                self.message.emit(tr("msg_forecast", CFG["low"], when_text(when)))
 
     def _poll(self):
         reading = self.kb.battery()
@@ -1130,8 +1213,16 @@ class Model(QObject):
         """Una pulsacion de este teclado. code: (codigo de escaneo, extendida)."""
         now = time.time()
         self.raw_input = True
-        was_idle = now - self.last_activity > IDLE_AFTER
+        gap = now - self.last_activity
+        was_idle = gap > IDLE_AFTER
+        if gap > BREAK_GAP:                     # tras una pausa empieza otra racha
+            self.session_start = now
+            self.break_warned = False
         self.last_activity = now
+        if (CFG["break_minutes"] and not self.break_warned
+                and now - self.session_start >= CFG["break_minutes"] * 60):
+            self.break_warned = True
+            self.message.emit(tr("msg_break", hours_text(now - self.session_start)))
         with self.data_lock:
             minute = int(now // 60)
             if minute != self.last_minute:      # un minuto con actividad = un minuto de uso
@@ -1186,28 +1277,114 @@ class Model(QObject):
             self.wake.clear()
 
     # --- versiones nuevas -------------------------------------------------------
-    def check_update(self):
-        request = urllib.request.Request(
-            f"https://api.github.com/repos/{REPO}/releases/latest",
-            headers={"User-Agent": APP_NAME, "Accept": "application/vnd.github+json"})
-        with urllib.request.urlopen(request, timeout=15) as response:
-            release = json.load(response)
+    @staticmethod
+    def _get(url, timeout=15):
+        return urllib.request.urlopen(urllib.request.Request(
+            url, headers={"User-Agent": APP_NAME}), timeout=timeout)
+
+    def check_update(self, manual=False):
+        """Busca una version mas nueva en GitHub. manual: informa tambien si no la hay."""
+        try:
+            with self._get(f"https://api.github.com/repos/{REPO}/releases/latest") as response:
+                release = json.load(response)
+        except Exception:
+            if manual:
+                self.update_status.emit(tr("check_failed"))
+            return
         tag = release.get("tag_name", "")
         latest = tuple(int(n) for n in re.findall(r"\d+", tag)[:3])
         if latest > tuple(int(n) for n in APP_VERSION.split(".")):
-            if self.update is None or self.update[0] != tag:
-                self.update = (tag, release.get("html_url", f"https://github.com/{REPO}"))
-                self.update_found.emit(*self.update)
+            known = self.update is not None and self.update[0] == tag
+            self.update = (tag, release.get("html_url", f"https://github.com/{REPO}"), release)
+            if not known:
+                self.update_found.emit(tag, self.update[1])
+                if CFG["auto_update"] and FROZEN and not manual:
+                    self.install_update()
+        elif manual:
+            self.update_status.emit(tr("up_to_date"))
+
+    def install_update(self, launch=True):
+        """Descarga el instalador, comprueba su huella SHA-256 y lo ejecuta en silencio.
+
+        El instalador cierra la app, la reemplaza y la vuelve a abrir (/AUTOUPDATE).
+        """
+        if not FROZEN and launch:
+            self.update_status.emit(tr("update_source"))
+            return
+        threading.Thread(target=self._install_update, args=(launch,), daemon=True).start()
+
+    def _install_update(self, launch):
+        tag, _, release = self.update
+        try:
+            assets = {a["name"]: a["browser_download_url"] for a in release.get("assets", [])}
+            if SETUP_NAME not in assets:
+                raise ValueError(tr("update_no_asset"))
+            if SUMS_NAME not in assets:
+                raise ValueError(tr("update_no_hash"))
+            with self._get(assets[SUMS_NAME]) as response:
+                sums = dict(reversed(line.split()) for line in
+                            response.read().decode().splitlines() if len(line.split()) == 2)
+            expected = sums.get(SETUP_NAME, "").lower()
+            if not expected:
+                raise ValueError(tr("update_no_hash"))
+            self.update_status.emit(tr("downloading", tag))
+            path = os.path.join(tempfile.gettempdir(), f"KooruiKeyboardSetup-{tag}.exe")
+            digest = hashlib.sha256()
+            with self._get(assets[SETUP_NAME], timeout=60) as response, open(path, "wb") as f:
+                while chunk := response.read(1 << 16):
+                    digest.update(chunk)
+                    f.write(chunk)
+            if digest.hexdigest() != expected:
+                os.remove(path)
+                raise ValueError(tr("update_bad_hash"))
+            self.update_status.emit(tr("installing", tag))
+            if launch:
+                subprocess.Popen([path, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART",
+                                  "/AUTOUPDATE"], close_fds=True,
+                                 creationflags=subprocess.DETACHED_PROCESS
+                                 | subprocess.CREATE_NEW_PROCESS_GROUP)
+        except Exception as error:
+            self.update_status.emit(tr("update_failed", error))
+            self.message.emit(tr("update_failed", error))
 
     def _update_loop(self):
         time.sleep(60)                      # sin prisa al arrancar Windows
         while True:
             if CFG["check_updates"]:
-                try:
-                    self.check_update()
-                except Exception:
-                    pass                    # sin conexion: se intenta de nuevo manana
+                self.check_update()
             time.sleep(UPDATE_EVERY)
+
+    # --- copia de seguridad -----------------------------------------------------
+    def export_backup(self, path):
+        with self.data_lock:
+            usage, keys = dict(self.usage), dict(self.keys)
+        data = {"app": APP_NAME, "version": APP_VERSION, "created": time.time(),
+                "settings": dict(CFG), "profiles": self.profiles, "modes": self.modes,
+                "history": list(self.history), "usage": usage, "keys": keys}
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+
+    def import_backup(self, path):
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict) or data.get("app") != APP_NAME:
+            raise ValueError(tr("backup_invalid"))
+        CFG.update({k: v for k, v in data.get("settings", {}).items() if k in DEFAULTS})
+        save_json(SETTINGS_FILE, CFG)
+        self.profiles = list(data.get("profiles", []))
+        save_json(PROFILES_FILE, self.profiles)
+        self.modes = dict(data.get("modes", {}))
+        save_json(MODES_FILE, self.modes)
+        self.history = list(data.get("history", []))
+        save_json(HISTORY_FILE, self.history)
+        with self.data_lock:
+            self.usage = dict(data.get("usage", {}))
+            self.keys = dict(data.get("keys", {}))
+            self.data_dirty = True
+        self._save_activity()
+        self.settings_changed.emit()
+        self.profiles_changed.emit()
+        self.changed.emit()
 
 
 # --- piezas del panel -----------------------------------------------------------
@@ -1627,6 +1804,33 @@ class HeatmapView(QWidget):
                 i += 1
 
 
+class DayBars(QWidget):
+    """Barras por dia con la inicial del dia de la semana debajo."""
+
+    def __init__(self, values, days):
+        super().__init__()
+        self.values, self.days = values, days
+        self.setFixedHeight(64)
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        top = max(self.values) or 1
+        width = self.width() / len(self.values)
+        plot = self.height() - 16
+        names = WEEKDAYS[lang_index()]
+        for n, (value, day) in enumerate(zip(self.values, self.days)):
+            height = max(2.0, plot * value / top)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(ACCENT if value else BORDER))
+            p.drawRoundedRect(QRectF(n * width + 2, plot - height, width - 4, height), 2, 2)
+            weekday = time.strptime(day, "%Y-%m-%d").tm_wday
+            p.setPen(QColor(MUTED))
+            p.setFont(ui_font(9))
+            p.drawText(QRectF(n * width, plot + 2, width, 14), Qt.AlignmentFlag.AlignHCenter,
+                       names[weekday][0].upper())
+
+
 class StatTile(QLabel):
     def __init__(self, value, caption):
         super().__init__(f"<div style='font-size:17px;font-weight:600;color:{TEXT}'>{value}</div>"
@@ -1661,6 +1865,7 @@ class ReportView(QWidget):
         self.add_charges(box, history)
         self.add_usage(box)
         self.add_heatmap(box)
+        self.add_typing(box)
         self.add_export(box)
         box.addStretch()
         self.layout_.addWidget(self.body)
@@ -1707,6 +1912,23 @@ class ReportView(QWidget):
         box.addWidget(body_label(tr("rep_heat_top", top)))
         box.addWidget(body_label(tr("rep_heat_total", short_count(stats["today"]),
                                     short_count(stats["daily"])), MUTED))
+
+    def add_typing(self, box):
+        box.addWidget(section_label(tr("rep_typing")))
+        if not CFG["heatmap"]:
+            box.addWidget(body_label(tr("rep_typing_off"), MUTED))
+            return
+        with self.model.data_lock:
+            stats = typing_stats(self.model.keys, self.model.usage)
+        if not any(stats["per_day"]):
+            box.addWidget(body_label(tr("rep_heat_empty"), MUTED))
+            return
+        box.addWidget(body_label(tr("rep_typing_avg", short_count(stats["avg"]),
+                                    f"{stats['rate']:.0f}")))
+        if stats["trend"] is not None:
+            box.addWidget(body_label(tr("rep_typing_trend", f"{stats['trend']:+.0f}%"), MUTED))
+        box.addWidget(body_label(tr("rep_typing_days"), MUTED))
+        box.addWidget(DayBars(stats["per_day"], stats["days"]))
 
     def add_export(self, box):
         row = QHBoxLayout()
@@ -1910,7 +2132,7 @@ class ModeDialog(QDialog):
 class SettingsDialog(QDialog):
     def __init__(self, parent):
         super().__init__(parent)
-        self.setWindowTitle(tr("settings"))
+        self.setWindowTitle(f"{tr('settings')} · v{APP_VERSION}")
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint)
         self.lang = QComboBox()
         self.lang.addItem("Español", "es")
@@ -1932,6 +2154,17 @@ class SettingsDialog(QDialog):
         self.heatmap.setChecked(CFG["heatmap"])
         self.check_updates = QCheckBox()
         self.check_updates.setChecked(CFG["check_updates"])
+        self.auto_update = QCheckBox()
+        self.auto_update.setChecked(CFG["auto_update"])
+        self.forecast_notify = QCheckBox()
+        self.forecast_notify.setChecked(CFG["forecast_notify"])
+        self.break_minutes = self.spin(0, 240, CFG["break_minutes"], " min")
+        backup = QHBoxLayout()
+        for key, action in (("backup_export", "backup_export"), ("backup_import", "backup_import")):
+            button = QPushButton(tr(key))
+            button.clicked.connect(lambda _, a=action: getattr(parent, a)(self))
+            backup.addWidget(button)
+        backup.addStretch()
         hours = QHBoxLayout()
         hours.addWidget(self.sched_from)
         hours.addWidget(QLabel("-"))
@@ -1945,11 +2178,15 @@ class SettingsDialog(QDialog):
         form.addRow(tr("critical"), self.critical)
         form.addRow(tr("full_notify"), self.full_notify)
         form.addRow(tr("full_level"), self.full_level)
+        form.addRow(tr("forecast_notify"), self.forecast_notify)
+        form.addRow(tr("break_minutes"), self.break_minutes)
         form.addRow(tr("lock_off"), self.lock_off)
         form.addRow(tr("sched_on"), self.sched_on)
         form.addRow(tr("sched_range"), hours)
         form.addRow(tr("heatmap"), self.heatmap)
         form.addRow(tr("check_updates"), self.check_updates)
+        form.addRow(tr("auto_update"), self.auto_update)
+        form.addRow(tr("backup"), backup)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
                                    | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
@@ -1981,7 +2218,10 @@ class SettingsDialog(QDialog):
                 "sched_from": self.sched_from.time().toString("HH:mm"),
                 "sched_to": self.sched_to.time().toString("HH:mm"),
                 "heatmap": self.heatmap.isChecked(),
-                "check_updates": self.check_updates.isChecked()}
+                "check_updates": self.check_updates.isChecked(),
+                "auto_update": self.auto_update.isChecked(),
+                "forecast_notify": self.forecast_notify.isChecked(),
+                "break_minutes": self.break_minutes.value()}
 
 
 class Panel(QWidget):
@@ -2091,6 +2331,23 @@ class Panel(QWidget):
         root.addWidget(self.stack)
         self.show_tab(0)
 
+        footer = QHBoxLayout()
+        version = QLabel(f"Koorui Keyboard v{APP_VERSION}")
+        version.setStyleSheet(f"color:{MUTED}; font:11px 'Segoe UI';")
+        self.update_button = QPushButton()
+        self.update_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.update_button.setStyleSheet(
+            f"QPushButton{{background:transparent;border:none;color:{ACCENT};padding:0;"
+            "font:11px 'Segoe UI';} QPushButton:hover{text-decoration:underline;}"
+            f"QPushButton:disabled{{color:{MUTED};}}")
+        self.update_button.clicked.connect(self.update_clicked)
+        footer.addWidget(version)
+        footer.addStretch()
+        footer.addWidget(self.update_button)
+        root.addLayout(footer)
+        model.update_status.connect(self.show_update_status)
+        model.update_found.connect(lambda *_: self.sync_update())
+
         self.timer = QTimer(self)
         self.timer.setInterval(40)
         self.timer.timeout.connect(self.animate)
@@ -2153,6 +2410,7 @@ class Panel(QWidget):
         self.gear.setToolTip(tr("settings"))
         for button, key in zip(self.tab_buttons, ("tab_panel", "tab_report")):
             button.setText(tr(key))
+        self.sync_update()
         self.rebuild_profiles()
         self.sync()
 
@@ -2240,6 +2498,54 @@ class Panel(QWidget):
         elif chosen == delete:
             self.model.delete_profile(index)
 
+    def sync_update(self):
+        update = self.model.update
+        self.update_button.setEnabled(True)
+        if update:
+            self.update_button.setText(tr("update_to", update[0]))
+            self.update_button.setStyleSheet(self.update_button.styleSheet().replace(
+                "font:11px", "font:600 11px"))
+        else:
+            self.update_button.setText(tr("check_now"))
+
+    def update_clicked(self):
+        self.update_button.setEnabled(False)
+        if self.model.update:
+            self.model.install_update()
+        else:
+            self.update_button.setText(tr("checking"))
+            threading.Thread(target=self.model.check_update, args=(True,), daemon=True).start()
+
+    def show_update_status(self, text):
+        self.update_button.setText(text)
+        if not text.endswith("…"):          # resultado final: volver al estado normal luego
+            QTimer.singleShot(5000, self.sync_update)
+
+    def backup_export(self, parent):
+        folder = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation)
+        path, _ = QFileDialog.getSaveFileName(
+            parent, tr("backup"), os.path.join(folder, f"koorui-backup-{day_key(time.time())}.json"),
+            "JSON (*.json)")
+        if path:
+            self.model.export_backup(path)
+            self.model.message.emit(tr("msg_backup_saved", path))
+
+    def backup_import(self, parent):
+        folder = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation)
+        path, _ = QFileDialog.getOpenFileName(parent, tr("backup"), folder, "JSON (*.json)")
+        if not path:
+            return
+        answer = QMessageBox.question(parent, tr("backup"), tr("backup_confirm"))
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self.model.import_backup(path)
+        except Exception as error:
+            QMessageBox.warning(parent, tr("backup"), str(error))
+            return
+        self.model.message.emit(tr("msg_backup_loaded"))
+        parent.reject()                     # los ajustes del dialogo ya no son los actuales
+
     def save_path(self, name, pattern):
         folder = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation)
         path, _ = self.modal(lambda: QFileDialog.getSaveFileName(
@@ -2315,7 +2621,7 @@ class Tray(QSystemTrayIcon):
         model.settings_changed.connect(self.build_menu)
         model.message.connect(lambda text: self.showMessage(tr("kb_title"), text))
         model.update_found.connect(self.on_update)
-        self.messageClicked.connect(self.open_update)
+        self.messageClicked.connect(lambda: self.model.update and self.panel.popup())
         self.build_menu()
         self.sync()
 
@@ -2342,7 +2648,12 @@ class Tray(QSystemTrayIcon):
         self.showMessage(tr("kb_title"), tr("msg_update", version))
 
     def open_update(self):
-        if self.model.update:
+        if not self.model.update:
+            return
+        if FROZEN:
+            self.panel.popup()
+            self.panel.update_clicked()
+        else:
             QDesktopServices.openUrl(QUrl(self.model.update[1]))
 
     def fill_profiles(self):

@@ -4,7 +4,7 @@
 
 #define AppName "Koorui Keyboard"
 #ifndef AppVersion
-  #define AppVersion "1.6.0"
+  #define AppVersion "1.7.0"
 #endif
 #define AppExe "KooruiKeyboard.exe"
 
@@ -51,12 +51,19 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; \
     Flags: nowait postinstall skipifsilent
+; Actualizacion desde la app (instalacion silenciosa con /AUTOUPDATE): volver a abrirla.
+Filename: "{app}\{#AppExe}"; Flags: nowait; Check: IsAutoUpdate
 
 [UninstallRun]
 Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM {#AppExe}"; Flags: runhidden; \
     RunOnceId: "CloseApp"
 
 [Code]
+function IsAutoUpdate: Boolean;
+begin
+  Result := Pos('/AUTOUPDATE', UpperCase(GetCmdTail)) > 0;
+end;
+
 // Cierra la app si esta abierta para poder reemplazar el ejecutable.
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var

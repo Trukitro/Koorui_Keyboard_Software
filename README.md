@@ -39,7 +39,9 @@ KOORUI no publica software para este teclado y, en modo 2.4 GHz, no hay forma de
 - **Apagado automático de luces**: al bloquear el PC y/o en un horario (por ejemplo de 23:00 a 07:00). Al desbloquear o terminar el horario vuelve el brillo que tenías. Ahorra batería.
 - **Informe**: previsión de cuándo cargar, autonomía según el brillo, desgaste de la batería mes a mes, estadísticas de carga, uso del teclado por horas y mapa de calor de teclas (opcional). Se puede exportar a CSV o a un informe HTML.
 - **Consulta inteligente**: mientras escribes consulta cada 30 s; en reposo baja a cada 5 min y vuelve a leer en cuanto pulsas una tecla.
-- **Aviso de versión nueva**: una vez al día comprueba en GitHub si hay una versión publicada más reciente y lo avisa en la bandeja (desactivable).
+- **Versión y actualizaciones**: el pie del panel muestra la versión instalada y un botón para buscar actualizaciones. Si hay una nueva, "Actualizar a vX.Y.Z" descarga el instalador, comprueba su huella SHA-256 y lo instala en silencio; la app se vuelve a abrir sola. Una vez al día lo comprueba por su cuenta y avisa en la bandeja. La instalación automática, sin preguntar, es opcional en los ajustes.
+- **Avisos de uso**: aviso de previsión cuando vas a llegar al umbral de batería baja en menos de un día ("llegarás al 20 % mañana hacia las 10:00"), y recordatorio de pausa tras un tiempo escribiendo sin parar (60 min por defecto).
+- **Copia de seguridad**: exportar e importar en un archivo los perfiles, nombres de modos, ajustes, historial, uso y pulsaciones, desde los ajustes.
 - **Ajustes**: idioma (español o inglés), intervalo de consulta, umbrales de aviso y apagado automático.
 - Detecta los cambios hechos con las teclas Fn del teclado y puede iniciarse con Windows.
 
@@ -61,6 +63,7 @@ Qué muestra el informe:
 - **Cargas**: cuándo fue la última, cargas por semana, tiempo medio entre cargas y cuánto tarda una carga de 0 a 100 %, más las cinco últimas cargas.
 - **Uso del teclado**: minutos de uso de hoy, media de los días que lo usas y una gráfica de uso por hora del día.
 - **Mapa de calor** (opcional, desactivado por defecto): el teclado coloreado según cuántas veces pulsas cada tecla en los últimos 30 días, y las teclas más usadas.
+- **Escritura** (con el mapa de calor activo): pulsaciones por día de las dos últimas semanas, media diaria, pulsaciones por minuto de uso y tendencia frente a la semana anterior.
 - **Exportar**: el historial de lecturas en CSV (se abre en Excel) o un informe HTML con todo lo anterior.
 
 ### Privacidad
@@ -70,7 +73,7 @@ Para saber cuándo usas el teclado, la app recibe de Windows los avisos de pulsa
 - Sin el mapa de calor, de cada pulsación solo usa el minuto en que ocurrió, para sumar minutos de uso.
 - Con el mapa de calor activo, suma además uno al contador de esa tecla por día. Nunca guarda qué escribes ni en qué orden.
 - Al desactivar el mapa de calor se borran los contadores.
-- Todo se guarda solo en tu PC. La única conexión a internet es la consulta diaria de versiones a GitHub, que se puede desactivar en los ajustes.
+- Todo se guarda solo en tu PC. Las únicas conexiones a internet son con GitHub: la consulta diaria de versiones (desactivable en los ajustes) y la descarga del instalador cuando actualizas.
 
 ## Instalación
 
@@ -117,7 +120,7 @@ Los perfiles, los nombres de los modos, el historial de batería (90 días), los
 
 ## Publicar una versión
 
-Al publicar una versión en GitHub, la acción [`Compilar`](.github/workflows/release.yml) genera en Windows el ejecutable y el instalador y los adjunta a esa versión. Antes, sube `APP_VERSION` en `koorui_battery.pyw` al mismo número que la etiqueta, para que el aviso de versión nueva funcione:
+Al publicar una versión en GitHub, la acción [`Compilar`](.github/workflows/release.yml) genera en Windows el ejecutable y el instalador y los adjunta a esa versión. También publica `SHA256SUMS.txt` con la huella de cada archivo; la app no instala una actualización si la huella no coincide. Antes de publicar, sube `APP_VERSION` en `koorui_battery.pyw` al mismo número que la etiqueta:
 
 ```bash
 gh release create v1.6.0 --title "v1.6.0" --notes "Novedades..."
@@ -195,6 +198,7 @@ Las teclas Fn nunca llegan al PC (las interpreta el propio teclado), por eso las
 - Los nombres de los modos vienen de la tabla habitual de los teclados EVision; si alguno no describe bien el efecto, se cambia con clic derecho.
 - Las animaciones del panel son aproximaciones, no una copia exacta de los efectos del teclado.
 - El uso por horas y el mapa de calor empiezan a contar desde la v1.6.0, y solo mientras la app está abierta.
+- La actualización desde la app funciona a partir de la v1.7.0 (las versiones anteriores no publican la huella SHA-256) y deja la app instalada con el instalador; si usabas el ejecutable portable, a partir de ahí se usa la versión instalada.
 - El informe necesita datos: la autonomía de cada brillo aparece tras 2 h de uso con ese brillo y una caída de 3 puntos, y las estadísticas de carga tras unos días. Las lecturas guardadas antes de la v1.5.0 no incluyen el brillo, así que no cuentan para la autonomía.
 - El tiempo restante es una estimación a partir del tramo de descarga actual; necesita al menos media hora de lecturas y una caída de 3 puntos, y cambia según el uso y el brillo.
 - El aviso de carga completa salta al llegar al nivel configurado (100 % por defecto, que es donde termina de cargar el teclado del autor).

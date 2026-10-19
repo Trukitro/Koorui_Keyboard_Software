@@ -1,5 +1,6 @@
 # Compila el ejecutable y el instalador en Windows.
-# - Al publicar una versión en GitHub (Releases): los adjunta a esa versión.
+# - Al publicar una versión en GitHub (Releases): los adjunta a esa versión junto con
+#   SHA256SUMS.txt, que la app usa para comprobar el instalador antes de actualizarse.
 # - A mano (Actions > Compilar > Run workflow): los deja como artefacto para descargar.
 name: Compilar
 
@@ -15,9 +16,9 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -37,13 +38,23 @@ jobs:
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$version" installer\koorui.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - uses: actions/upload-artifact@v4
+      - name: Huellas SHA-256
+        shell: pwsh
+        run: |
+          Get-FileHash dist\*.exe -Algorithm SHA256 |
+            ForEach-Object { "{0}  {1}" -f $_.Hash.ToLower(), (Split-Path $_.Path -Leaf) } |
+            Set-Content -Encoding ascii dist\SHA256SUMS.txt
+          Get-Content dist\SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v7
         with:
           name: KooruiKeyboard
-          path: dist/*.exe
+          path: |
+            dist/*.exe
+            dist/SHA256SUMS.txt
 
       - name: Adjuntar a la versión
         if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.event.release.tag_name }}" dist/KooruiKeyboard.exe dist/KooruiKeyboardSetup.exe --clobber
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/KooruiKeyboard.exe dist/KooruiKeyboardSetup.exe dist/SHA256SUMS.txt --clobber
