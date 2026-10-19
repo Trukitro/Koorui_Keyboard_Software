@@ -45,7 +45,7 @@ KOORUI does not publish software for this keyboard and, in 2.4 GHz mode, there i
 - **Settings**: language (English or Spanish), polling interval, notification thresholds and automatic lights off.
 - Picks up changes made with the keyboard's Fn keys and can start with Windows.
 
-Settings window (gear button or right-click on the tray icon):
+Settings tab (the gear next to Panel and Report, or "Settings" when right-clicking the tray icon). Changes are saved instantly:
 
 ![Settings](docs/settings.png)
 
@@ -114,7 +114,7 @@ In all cases you need Windows 10 or 11 and the keyboard connected in one of the 
 - **Right-click** a mode: change its name and the animation used to represent it.
 - **"+ Save current"**: saves the current lighting as a profile.
 - **Click** a profile: applies it. **Right-click**: rename, update with the current lights, or delete.
-- **Gear**: opens the settings.
+- **Gear tab**: settings; every change is saved instantly.
 
 Profiles, mode names, battery history (90 days), settings and the error log are stored in `%APPDATA%\KooruiBattery`.
 

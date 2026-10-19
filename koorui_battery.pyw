@@ -100,7 +100,7 @@ IDLE_POLL = 5 * 60              # intervalo de consulta mientras esta en reposo
 ACTIVITY_KEEP = 90             # dias de uso y pulsaciones que se conservan
 HEAT_DAYS = 30                 # dias que suma el mapa de calor
 
-APP_VERSION = "1.7.0"
+APP_VERSION = "1.8.0"
 FROZEN = getattr(sys, "frozen", False)  # ejecutable empaquetado (no desde el codigo)
 SETUP_NAME, SUMS_NAME = "KooruiKeyboardSetup.exe", "SHA256SUMS.txt"
 BREAK_GAP = 5 * 60              # una parada mas larga cuenta como pausa
@@ -159,6 +159,15 @@ STR = {
     "open_panel": ("Abrir panel", "Open panel"),
     "refresh": ("Actualizar ahora", "Refresh now"),
     "settings": ("Ajustes", "Settings"),
+    "set_general": ("GENERAL", "GENERAL"),
+    "set_battery": ("BATERÍA", "BATTERY"),
+    "set_lights": ("LUCES", "LIGHTS"),
+    "set_use": ("USO", "USE"),
+    "set_updates": ("ACTUALIZACIONES", "UPDATES"),
+    "set_note": ("Los cambios se guardan al momento.", "Changes are saved instantly."),
+    "heatmap_confirm": ("Al desactivar el mapa de calor se borran los contadores de pulsaciones. "
+                        "¿Continuar?",
+                        "Turning the heatmap off deletes the key press counters. Continue?"),
     "autostart": ("Iniciar con Windows", "Start with Windows"),
     "quit": ("Salir", "Quit"),
     "lights": ("Luces", "Lights"),
@@ -2129,99 +2138,175 @@ class ModeDialog(QDialog):
         self.setMinimumWidth(320)
 
 
-class SettingsDialog(QDialog):
-    def __init__(self, parent):
-        super().__init__(parent)
-        self.setWindowTitle(f"{tr('settings')} · v{APP_VERSION}")
-        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint)
-        self.lang = QComboBox()
-        self.lang.addItem("Español", "es")
-        self.lang.addItem("English", "en")
-        self.lang.setCurrentIndex(lang_index())
-        self.poll = self.spin(10, 600, CFG["poll"], " s")
-        self.low = self.spin(5, 50, CFG["low"], " %")
-        self.critical = self.spin(0, 50, CFG["critical"], " %")
-        self.full_notify = QCheckBox()
-        self.full_notify.setChecked(CFG["full_notify"])
-        self.full_level = self.spin(80, 100, CFG["full_level"], " %")
-        self.lock_off = QCheckBox()
-        self.lock_off.setChecked(CFG["lock_off"])
-        self.sched_on = QCheckBox()
-        self.sched_on.setChecked(CFG["sched_on"])
-        self.sched_from = self.clock(CFG["sched_from"])
-        self.sched_to = self.clock(CFG["sched_to"])
-        self.heatmap = QCheckBox()
-        self.heatmap.setChecked(CFG["heatmap"])
-        self.check_updates = QCheckBox()
-        self.check_updates.setChecked(CFG["check_updates"])
-        self.auto_update = QCheckBox()
-        self.auto_update.setChecked(CFG["auto_update"])
-        self.forecast_notify = QCheckBox()
-        self.forecast_notify.setChecked(CFG["forecast_notify"])
-        self.break_minutes = self.spin(0, 240, CFG["break_minutes"], " min")
-        backup = QHBoxLayout()
-        for key, action in (("backup_export", "backup_export"), ("backup_import", "backup_import")):
-            button = QPushButton(tr(key))
-            button.clicked.connect(lambda _, a=action: getattr(parent, a)(self))
-            backup.addWidget(button)
-        backup.addStretch()
-        hours = QHBoxLayout()
-        hours.addWidget(self.sched_from)
-        hours.addWidget(QLabel("-"))
-        hours.addWidget(self.sched_to)
-        hours.addStretch()
-        form = QFormLayout(self)
-        form.setVerticalSpacing(10)
-        form.addRow(tr("language"), self.lang)
-        form.addRow(tr("poll"), self.poll)
-        form.addRow(tr("low"), self.low)
-        form.addRow(tr("critical"), self.critical)
-        form.addRow(tr("full_notify"), self.full_notify)
-        form.addRow(tr("full_level"), self.full_level)
-        form.addRow(tr("forecast_notify"), self.forecast_notify)
-        form.addRow(tr("break_minutes"), self.break_minutes)
-        form.addRow(tr("lock_off"), self.lock_off)
-        form.addRow(tr("sched_on"), self.sched_on)
-        form.addRow(tr("sched_range"), hours)
-        form.addRow(tr("heatmap"), self.heatmap)
-        form.addRow(tr("check_updates"), self.check_updates)
-        form.addRow(tr("auto_update"), self.auto_update)
-        form.addRow(tr("backup"), backup)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
-                                   | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        form.addRow(buttons)
-        self.setMinimumWidth(360)
+def no_wheel(widget):
+    """La rueda del raton solo cambia el valor si el control tiene el foco; si no, desplaza."""
+    widget.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+    original = widget.wheelEvent
 
-    @staticmethod
-    def spin(low, high, value, suffix):
-        box = QSpinBox()
+    def wheel(event):
+        if widget.hasFocus():
+            original(event)
+        else:
+            event.ignore()
+    widget.wheelEvent = wheel
+    return widget
+
+
+def scroll_area(widget):
+    area = QScrollArea()
+    area.setWidget(widget)
+    area.setWidgetResizable(True)
+    area.setFrameShape(QScrollArea.Shape.NoFrame)
+    area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    area.setStyleSheet(
+        "QScrollArea,QScrollArea>QWidget>QWidget{background:transparent;}"
+        "QScrollBar:vertical{width:6px;background:transparent;margin:0;}"
+        f"QScrollBar::handle:vertical{{background:{BORDER};border-radius:3px;min-height:30px;}}"
+        "QScrollBar::add-line,QScrollBar::sub-line{height:0;}")
+    return area
+
+
+class SettingsView(QWidget):
+    """Pestana de ajustes; cada cambio se guarda al momento."""
+
+    def __init__(self, panel):
+        super().__init__()
+        self.panel, self.model = panel, panel.model
+        self.layout_ = QVBoxLayout(self)
+        self.layout_.setContentsMargins(0, 0, 8, 0)
+        self.body = None
+        self.fields = {}
+        self.timer = QTimer(self)
+        self.timer.setSingleShot(True)
+        self.timer.setInterval(400)
+        self.timer.timeout.connect(self.commit)
+        self.build()
+
+    # --- controles --------------------------------------------------------
+    def spin(self, key, low, high, suffix):
+        box = no_wheel(QSpinBox())
         box.setRange(low, high)
-        box.setValue(value)
+        box.setValue(CFG[key])
         box.setSuffix(suffix)
+        box.valueChanged.connect(self.changed)
+        self.fields[key] = box
         return box
 
-    @staticmethod
-    def clock(text):
-        edit = QTimeEdit(QTime.fromString(text, "HH:mm"))
+    def clock(self, key):
+        edit = no_wheel(QTimeEdit(QTime.fromString(CFG[key], "HH:mm")))
         edit.setDisplayFormat("HH:mm")
+        edit.timeChanged.connect(self.changed)
+        self.fields[key] = edit
         return edit
 
+    def check(self, box, key):
+        check = QCheckBox(tr(key))
+        check.setChecked(CFG[key])
+        check.toggled.connect(self.changed)
+        self.fields[key] = check
+        box.addWidget(check)
+
+    @staticmethod
+    def row(box, key, *widgets):
+        line = QHBoxLayout()
+        line.addWidget(body_label(tr(key)), 1)
+        for widget in widgets:
+            line.addWidget(widget)
+        box.addLayout(line)
+
+    def build(self):
+        self.timer.stop()
+        if self.body is not None:
+            self.layout_.removeWidget(self.body)
+            self.body.setParent(None)
+            self.body.deleteLater()
+        self.fields = {}
+        self.body = QWidget()
+        box = QVBoxLayout(self.body)
+        box.setContentsMargins(0, 0, 0, 0)
+        box.setSpacing(8)
+
+        box.addWidget(section_label(tr("set_general")))
+        lang = no_wheel(QComboBox())
+        lang.addItem("Español", "es")
+        lang.addItem("English", "en")
+        lang.setCurrentIndex(lang_index())
+        lang.currentIndexChanged.connect(self.commit)
+        self.fields["lang"] = lang
+        self.row(box, "language", lang)
+        self.row(box, "poll", self.spin("poll", 10, 600, " s"))
+
+        box.addWidget(section_label(tr("set_battery")))
+        self.row(box, "low", self.spin("low", 5, 50, " %"))
+        self.row(box, "critical", self.spin("critical", 0, 50, " %"))
+        self.check(box, "full_notify")
+        self.row(box, "full_level", self.spin("full_level", 80, 100, " %"))
+        self.check(box, "forecast_notify")
+
+        box.addWidget(section_label(tr("set_lights")))
+        self.check(box, "lock_off")
+        self.check(box, "sched_on")
+        self.row(box, "sched_range", self.clock("sched_from"), QLabel("-"),
+                 self.clock("sched_to"))
+
+        box.addWidget(section_label(tr("set_use")))
+        self.row(box, "break_minutes", self.spin("break_minutes", 0, 240, " min"))
+        self.check(box, "heatmap")
+
+        box.addWidget(section_label(tr("set_updates")))
+        self.check(box, "check_updates")
+        self.check(box, "auto_update")
+
+        box.addWidget(section_label(tr("backup").upper()))
+        line = QHBoxLayout()
+        for key in ("backup_export", "backup_import"):
+            button = QPushButton(tr(key))
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.clicked.connect(lambda _, k=key: getattr(self.panel, k)())
+            line.addWidget(button)
+        box.addLayout(line)
+
+        box.addSpacing(4)
+        box.addWidget(body_label(tr("set_note"), MUTED))
+        box.addStretch()
+        self.layout_.addWidget(self.body)
+
+    # --- guardar ----------------------------------------------------------
+    def changed(self, *_):
+        self.timer.start()                  # espera a que deje de tocar el control
+
     def values(self):
-        low = self.low.value()
-        return {"lang": self.lang.currentData(), "poll": self.poll.value(), "low": low,
-                "critical": min(self.critical.value(), low),
-                "full_notify": self.full_notify.isChecked(),
-                "full_level": self.full_level.value(),
-                "lock_off": self.lock_off.isChecked(), "sched_on": self.sched_on.isChecked(),
-                "sched_from": self.sched_from.time().toString("HH:mm"),
-                "sched_to": self.sched_to.time().toString("HH:mm"),
-                "heatmap": self.heatmap.isChecked(),
-                "check_updates": self.check_updates.isChecked(),
-                "auto_update": self.auto_update.isChecked(),
-                "forecast_notify": self.forecast_notify.isChecked(),
-                "break_minutes": self.break_minutes.value()}
+        f = self.fields
+        low = f["low"].value()
+        values = {"lang": f["lang"].currentData(), "low": low,
+                  "critical": min(f["critical"].value(), low),
+                  "sched_from": f["sched_from"].time().toString("HH:mm"),
+                  "sched_to": f["sched_to"].time().toString("HH:mm")}
+        for key in ("poll", "full_level", "break_minutes"):
+            values[key] = f[key].value()
+        for key in ("full_notify", "forecast_notify", "lock_off", "sched_on", "heatmap",
+                    "check_updates", "auto_update"):
+            values[key] = f[key].isChecked()
+        return values
+
+    def commit(self):
+        self.timer.stop()
+        values = self.values()
+        if CFG["heatmap"] and not values["heatmap"]:
+            answer = self.panel.modal(lambda: QMessageBox.question(
+                self, tr("settings"), tr("heatmap_confirm")))
+            if answer != QMessageBox.StandardButton.Yes:
+                heatmap = self.fields["heatmap"]
+                heatmap.blockSignals(True)
+                heatmap.setChecked(True)
+                heatmap.blockSignals(False)
+                values["heatmap"] = True
+        if all(CFG[k] == v for k, v in values.items()):
+            return
+        relabel = values["lang"] != CFG["lang"]
+        self.model.save_settings(values)
+        if relabel:                         # textos en el otro idioma
+            QTimer.singleShot(0, self.build)
 
 
 class Panel(QWidget):
@@ -2243,29 +2328,19 @@ class Panel(QWidget):
         root.setContentsMargins(18, 14, 18, 14)
         root.setSpacing(8)
 
-        header = QHBoxLayout()
-        header.addWidget(BatteryView(model))
-        self.gear = QPushButton("⚙")
-        self.gear.setFixedSize(30, 30)
-        self.gear.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.gear.setStyleSheet(
-            f"QPushButton{{background:transparent;border:none;color:{MUTED};font-size:17px;"
-            f"padding:0;}} QPushButton:hover{{color:{TEXT};}}")
-        self.gear.clicked.connect(self.open_settings)
-        header.addWidget(self.gear)
-        root.addLayout(header)
+        root.addWidget(BatteryView(model))
 
         tabs = QHBoxLayout()
         tabs.setSpacing(4)
         self.tab_buttons = []
-        for index in range(2):
-            button = QPushButton()
+        for index in range(3):
+            button = QPushButton("⚙" if index == 2 else "")
             button.setCheckable(True)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setStyleSheet(
                 f"QPushButton{{background:transparent;border:none;color:{MUTED};"
                 "border-bottom:2px solid transparent;border-radius:0;padding:4px 10px;"
-                "font:600 12px 'Segoe UI';}"
+                f"font:600 {15 if index == 2 else 12}px 'Segoe UI';}}"
                 f"QPushButton:checked{{color:{TEXT};border-bottom:2px solid {ACCENT};}}"
                 f"QPushButton:hover{{color:{TEXT};}}")
             button.clicked.connect(lambda _, n=index: self.show_tab(n))
@@ -2315,19 +2390,12 @@ class Panel(QWidget):
         self.speed = self.slider_row(body, "speed", OFF_SPEED)
 
         self.report = ReportView(model)
-        self.report_scroll = QScrollArea()
-        self.report_scroll.setWidget(self.report)
-        self.report_scroll.setWidgetResizable(True)
-        self.report_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        self.report_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.report_scroll.setStyleSheet(
-            "QScrollArea,QScrollArea>QWidget>QWidget{background:transparent;}"
-            "QScrollBar:vertical{width:6px;background:transparent;margin:0;}"
-            f"QScrollBar::handle:vertical{{background:{BORDER};border-radius:3px;min-height:30px;}}"
-            "QScrollBar::add-line,QScrollBar::sub-line{height:0;}")
+        self.report_scroll = scroll_area(self.report)
+        self.settings = SettingsView(self)
         self.stack = QStackedWidget()
         self.stack.addWidget(main)
         self.stack.addWidget(self.report_scroll)
+        self.stack.addWidget(scroll_area(self.settings))
         root.addWidget(self.stack)
         self.show_tab(0)
 
@@ -2407,9 +2475,9 @@ class Panel(QWidget):
             tile.setToolTip(tr("mode_tip"))
         for swatch in self.swatches:
             swatch.retranslate()
-        self.gear.setToolTip(tr("settings"))
         for button, key in zip(self.tab_buttons, ("tab_panel", "tab_report")):
             button.setText(tr(key))
+        self.tab_buttons[2].setToolTip(tr("settings"))
         self.sync_update()
         self.rebuild_profiles()
         self.sync()
@@ -2443,6 +2511,8 @@ class Panel(QWidget):
             button.setChecked(n == index)
         if index == 1:
             self.report.refresh()
+        elif index == 2:
+            self.settings.build()           # valores al dia (por ejemplo tras importar)
 
     def animate(self):
         self.keyboard.update()
@@ -2521,30 +2591,31 @@ class Panel(QWidget):
         if not text.endswith("…"):          # resultado final: volver al estado normal luego
             QTimer.singleShot(5000, self.sync_update)
 
-    def backup_export(self, parent):
+    def backup_export(self):
         folder = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation)
-        path, _ = QFileDialog.getSaveFileName(
-            parent, tr("backup"), os.path.join(folder, f"koorui-backup-{day_key(time.time())}.json"),
-            "JSON (*.json)")
+        path, _ = self.modal(lambda: QFileDialog.getSaveFileName(
+            self, tr("backup"), os.path.join(folder, f"koorui-backup-{day_key(time.time())}.json"),
+            "JSON (*.json)"))
         if path:
             self.model.export_backup(path)
             self.model.message.emit(tr("msg_backup_saved", path))
 
-    def backup_import(self, parent):
+    def backup_import(self):
         folder = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation)
-        path, _ = QFileDialog.getOpenFileName(parent, tr("backup"), folder, "JSON (*.json)")
+        path, _ = self.modal(lambda: QFileDialog.getOpenFileName(
+            self, tr("backup"), folder, "JSON (*.json)"))
         if not path:
             return
-        answer = QMessageBox.question(parent, tr("backup"), tr("backup_confirm"))
+        answer = self.modal(lambda: QMessageBox.question(self, tr("backup"), tr("backup_confirm")))
         if answer != QMessageBox.StandardButton.Yes:
             return
         try:
             self.model.import_backup(path)
         except Exception as error:
-            QMessageBox.warning(parent, tr("backup"), str(error))
+            self.modal(lambda: QMessageBox.warning(self, tr("backup"), str(error)))
             return
         self.model.message.emit(tr("msg_backup_loaded"))
-        parent.reject()                     # los ajustes del dialogo ya no son los actuales
+        QTimer.singleShot(0, self.settings.build)   # mostrar los ajustes importados
 
     def save_path(self, name, pattern):
         folder = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation)
@@ -2566,9 +2637,9 @@ class Panel(QWidget):
             QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
     def open_settings(self):
-        dlg = SettingsDialog(self)
-        if self.modal(dlg.exec):
-            self.model.save_settings(dlg.values())
+        if not self.isVisible():
+            self.popup()
+        self.show_tab(2)
 
     # --- ventana ----------------------------------------------------------
     def paintEvent(self, _):

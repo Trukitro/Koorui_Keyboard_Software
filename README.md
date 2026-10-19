@@ -45,7 +45,7 @@ KOORUI no publica software para este teclado y, en modo 2.4 GHz, no hay forma de
 - **Ajustes**: idioma (español o inglés), intervalo de consulta, umbrales de aviso y apagado automático.
 - Detecta los cambios hechos con las teclas Fn del teclado y puede iniciarse con Windows.
 
-Ventana de ajustes (botón del engranaje o clic derecho en el icono):
+Pestaña de ajustes (el engranaje junto a Panel e Informe, o "Ajustes" en el clic derecho del icono). Los cambios se guardan al momento:
 
 ![Ajustes](docs/settings.png)
 
@@ -114,7 +114,7 @@ En todos los casos hace falta Windows 10 u 11 y el teclado conectado en alguno d
 - **Clic derecho** en un modo: cambia su nombre y la animación con la que se representa.
 - **"+ Guardar actual"**: guarda las luces de ese momento como perfil.
 - **Clic** en un perfil: lo aplica. **Clic derecho**: renombrar, actualizar con las luces actuales o eliminar.
-- **Engranaje**: abre los ajustes.
+- **Pestaña del engranaje**: ajustes; cada cambio se guarda al momento.
 
 Los perfiles, los nombres de los modos, el historial de batería (90 días), los ajustes y el registro de errores se guardan en `%APPDATA%\KooruiBattery`.
 
