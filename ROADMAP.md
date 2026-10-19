@@ -1,6 +1,6 @@
 # Plan a futuro
 
-Estado actual: **v1.8.0**. Batería con detección de carga, historial y estimación, avisos configurables, perfiles de luces, apagado automático, ajustes con idioma, instalador para Windows, modos cable y Bluetooth como opciones, informe completo (autonomía, desgaste, cargas, uso, mapa de calor, exportación), consulta inteligente, actualización desde la app con verificación SHA-256, avisos de previsión y de pausa, copia de seguridad y compilación automática.
+Estado actual: **v1.9.0**. Batería con detección de carga, historial y estimación, avisos configurables, perfiles de luces, apagado automático, ajustes con idioma, instalador para Windows, modos cable y Bluetooth como opciones, informe completo (autonomía, desgaste, cargas, uso, mapa de calor, exportación), consulta inteligente, actualización desde la app con verificación SHA-256, avisos de previsión y de pausa, copia de seguridad, pestaña de escritura con palabras por minuto y compilación automática.
 
 El plan está ordenado por prioridad. Primero va confirmar lo que hoy son suposiciones, porque varias funciones futuras dependen de ello.
 

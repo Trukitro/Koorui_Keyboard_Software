@@ -38,6 +38,7 @@ KOORUI no publica software para este teclado y, en modo 2.4 GHz, no hay forma de
 - **Perfiles de luces**: guarda combinaciones de modo, color, brillo y velocidad con nombre y aplícalas con un clic, desde el panel o desde el menú del icono.
 - **Apagado automático de luces**: al bloquear el PC y/o en un horario (por ejemplo de 23:00 a 07:00). Al desbloquear o terminar el horario vuelve el brillo que tenías. Ahorra batería.
 - **Informe**: previsión de cuándo cargar, autonomía según el brillo, desgaste de la batería mes a mes, estadísticas de carga, uso del teclado por horas y mapa de calor de teclas (opcional). Se puede exportar a CSV o a un informe HTML.
+- **Escritura (palabras por minuto)**: pestaña con tus PPM de hoy, nivel, precisión, mejor racha, media y tendencia semanal, récord y una gráfica día a día. Opcional, desactivada por defecto.
 - **Consulta inteligente**: mientras escribes consulta cada 30 s; en reposo baja a cada 5 min y vuelve a leer en cuanto pulsas una tecla.
 - **Versión y actualizaciones**: el pie del panel muestra la versión instalada y un botón para buscar actualizaciones. Si hay una nueva, "Actualizar a vX.Y.Z" descarga el instalador, comprueba su huella SHA-256 y lo instala en silencio; la app se vuelve a abrir sola. Una vez al día lo comprueba por su cuenta y avisa en la bandeja. La instalación automática, sin preguntar, es opcional en los ajustes.
 - **Avisos de uso**: aviso de previsión cuando vas a llegar al umbral de batería baja en menos de un día ("llegarás al 20 % mañana hacia las 10:00"), y recordatorio de pausa tras un tiempo escribiendo sin parar (60 min por defecto).
@@ -48,6 +49,12 @@ KOORUI no publica software para este teclado y, en modo 2.4 GHz, no hay forma de
 Pestaña de ajustes (el engranaje junto a Panel e Informe, o "Ajustes" en el clic derecho del icono). Los cambios se guardan al momento:
 
 ![Ajustes](docs/settings.png)
+
+Pestaña de escritura, con las palabras por minuto día a día:
+
+![Escritura](docs/typing.png)
+
+Cómo se miden las PPM: una palabra son 5 pulsaciones de carácter (letras, números, signos y espacio), el estándar de los test de mecanografía. Solo cuentan las rachas en que escribes de seguido: una pausa de más de 2 s cierra la racha, y las de menos de 20 caracteres o 6 segundos se descartan. La precisión cuenta cada borrado como un error. Al medir mientras escribes de forma natural, el resultado suele quedar algo por debajo de un test.
 
 Pestaña de informe:
 
@@ -63,7 +70,6 @@ Qué muestra el informe:
 - **Cargas**: cuándo fue la última, cargas por semana, tiempo medio entre cargas y cuánto tarda una carga de 0 a 100 %, más las cinco últimas cargas.
 - **Uso del teclado**: minutos de uso de hoy, media de los días que lo usas y una gráfica de uso por hora del día.
 - **Mapa de calor** (opcional, desactivado por defecto): el teclado coloreado según cuántas veces pulsas cada tecla en los últimos 30 días, y las teclas más usadas.
-- **Escritura** (con el mapa de calor activo): pulsaciones por día de las dos últimas semanas, media diaria, pulsaciones por minuto de uso y tendencia frente a la semana anterior.
 - **Exportar**: el historial de lecturas en CSV (se abre en Excel) o un informe HTML con todo lo anterior.
 
 ### Privacidad
@@ -73,6 +79,7 @@ Para saber cuándo usas el teclado, la app recibe de Windows los avisos de pulsa
 - Sin el mapa de calor, de cada pulsación solo usa el minuto en que ocurrió, para sumar minutos de uso.
 - Con el mapa de calor activo, suma además uno al contador de esa tecla por día. Nunca guarda qué escribes ni en qué orden.
 - Al desactivar el mapa de calor se borran los contadores.
+- Con la medición de PPM activa, de cada pulsación solo usa si es un carácter, un borrado u otra tecla, y el tiempo entre pulsaciones; guarda por día los caracteres, segundos y borrados de las rachas, nunca qué escribes.
 - Todo se guarda solo en tu PC. Las únicas conexiones a internet son con GitHub: la consulta diaria de versiones (desactivable en los ajustes) y la descarga del instalador cuando actualizas.
 
 ## Instalación

@@ -38,6 +38,7 @@ KOORUI does not publish software for this keyboard and, in 2.4 GHz mode, there i
 - **Lighting profiles**: save combinations of mode, color, brightness and speed under a name and apply them with one click, from the panel or from the tray menu.
 - **Automatic lights off**: when the PC is locked and/or on a schedule (for example 23:00 to 07:00). On unlock or when the schedule ends, your previous brightness comes back. Saves battery.
 - **Report**: forecast of when to charge, battery life by brightness, monthly battery wear, charging statistics, keyboard use by hour and a key heatmap (optional). It can be exported to CSV or to an HTML report.
+- **Typing (words per minute)**: a tab with your WPM today, level, accuracy, best burst, weekly average and trend, record and a day-by-day chart. Optional, off by default.
 - **Smart polling**: while you type it checks every 30 s; when idle it drops to every 5 min and reads again as soon as you press a key.
 - **Version and updates**: the panel footer shows the installed version and a button to check for updates. If there is a newer one, "Update to vX.Y.Z" downloads the installer, verifies its SHA-256 checksum and installs it silently; the app reopens by itself. It also checks once a day and shows a tray notification. Installing automatically without asking is optional in the settings.
 - **Usage notifications**: a forecast notice when you will reach the low-battery threshold within a day ("you will reach 20% tomorrow around 10:00"), and a break reminder after typing non-stop for a while (60 min by default).
@@ -48,6 +49,12 @@ KOORUI does not publish software for this keyboard and, in 2.4 GHz mode, there i
 Settings tab (the gear next to Panel and Report, or "Settings" when right-clicking the tray icon). Changes are saved instantly:
 
 ![Settings](docs/settings.png)
+
+Typing tab, with words per minute day by day:
+
+![Typing](docs/typing.png)
+
+How WPM is measured: one word is 5 character presses (letters, digits, punctuation and space), the standard used by typing tests. Only bursts of continuous typing count: a pause longer than 2 s ends the burst, and bursts under 20 characters or 6 seconds are discarded. Accuracy counts each backspace as an error. Because it measures natural typing, the result usually comes out somewhat below a typing test.
 
 Report tab:
 
@@ -63,7 +70,6 @@ What the report shows:
 - **Charging**: last charge, charges per week, average time between charges and how long a 0 to 100% charge takes, plus the last five charges.
 - **Keyboard use**: minutes of use today, the average on days you use it and a chart of use by hour of day.
 - **Heatmap** (optional, off by default): the keyboard colored by how often you press each key over the last 30 days, and the most used keys.
-- **Typing** (with the heatmap on): key presses per day over the last two weeks, daily average, presses per minute of use and the trend against the previous week.
 - **Export**: the reading history as CSV (opens in Excel) or an HTML report with all of the above.
 
 ### Privacy
@@ -73,6 +79,7 @@ To know when you use the keyboard, the app receives key press notifications from
 - Without the heatmap, it only uses the minute each press happened in, to add up minutes of use.
 - With the heatmap on, it also adds one to that key's daily counter. It never stores what you type or in what order.
 - Turning the heatmap off deletes the counters.
+- With WPM measurement on, it only uses whether each press is a character, a backspace or another key, and the time between presses; per day it stores the characters, seconds and backspaces of the bursts, never what you type.
 - Everything stays on your PC. The only internet connections are to GitHub: the daily version check (can be turned off in the settings) and downloading the installer when you update.
 
 ## Installation

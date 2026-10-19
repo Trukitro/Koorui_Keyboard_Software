@@ -87,6 +87,7 @@ SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 AUTO_FILE = os.path.join(DATA_DIR, "auto.json")
 USAGE_FILE = os.path.join(DATA_DIR, "usage.json")      # minutos de uso por dia y hora
 KEYS_FILE = os.path.join(DATA_DIR, "keys.json")        # pulsaciones por dia y tecla
+TYPING_FILE = os.path.join(DATA_DIR, "typing.json")    # rachas de escritura por dia (PPM)
 LOG_FILE = os.path.join(DATA_DIR, "error.log")
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 
@@ -100,10 +101,15 @@ IDLE_POLL = 5 * 60              # intervalo de consulta mientras esta en reposo
 ACTIVITY_KEEP = 90             # dias de uso y pulsaciones que se conservan
 HEAT_DAYS = 30                 # dias que suma el mapa de calor
 
-APP_VERSION = "1.8.0"
+APP_VERSION = "1.9.0"
 FROZEN = getattr(sys, "frozen", False)  # ejecutable empaquetado (no desde el codigo)
 SETUP_NAME, SUMS_NAME = "KooruiKeyboardSetup.exe", "SHA256SUMS.txt"
 BREAK_GAP = 5 * 60              # una parada mas larga cuenta como pausa
+BURST_GAP = 2.0                 # una pausa mayor entre teclas cierra la racha de escritura
+BURST_MIN_CHARS, BURST_MIN_SECS = 20, 6     # rachas mas cortas no cuentan para las PPM
+BEST_MIN_SECS = 20              # duracion minima para contar como mejor racha
+WPM_LEVELS = ((0, "Inicial", "Beginner"), (20, "Básico", "Basic"), (40, "Medio", "Average"),
+              (60, "Rápido", "Fast"), (80, "Muy rápido", "Very fast"), (100, "Experto", "Expert"))
 REPO = "Trukitro/Koorui_Keyboard_Software"
 UPDATE_EVERY = DAY
 
@@ -115,7 +121,7 @@ DEFAULTS = {"lang": "es", "poll": 30, "low": 20, "critical": 10,
             "full_notify": True, "full_level": 100,
             "lock_off": False, "sched_on": False, "sched_from": "23:00", "sched_to": "07:00",
             "heatmap": False, "check_updates": True, "auto_update": False,
-            "forecast_notify": True, "break_minutes": 60}
+            "forecast_notify": True, "break_minutes": 60, "wpm": False}
 AUTO_SETTLE = 10                # segundos de margen tras una escritura automatica
 CFG = dict(DEFAULTS)
 
@@ -160,6 +166,39 @@ STR = {
     "refresh": ("Actualizar ahora", "Refresh now"),
     "settings": ("Ajustes", "Settings"),
     "set_general": ("GENERAL", "GENERAL"),
+    "tab_typing": ("Escritura", "Typing"),
+    "wpm": ("Medir palabras por minuto (PPM)", "Measure words per minute (WPM)"),
+    "wpm_unit": ("PPM", "WPM"),
+    "wpm_off": ("La medición de velocidad está desactivada. Si la activas, la app solo mira si "
+                "cada pulsación de este teclado es una letra, un borrado u otra tecla, y cuánto "
+                "tiempo pasa entre ellas. Nunca guarda qué escribes.",
+                "Speed measurement is off. When on, the app only looks at whether each press on "
+                "this keyboard is a character, a backspace or another key, and the time between "
+                "them. It never stores what you type."),
+    "wpm_enable": ("Activar medición", "Turn it on"),
+    "wpm_none": ("Aún no hay rachas medidas. Escribe de seguido unos segundos con este teclado.",
+                 "No bursts measured yet. Type continuously for a few seconds on this keyboard."),
+    "wpm_today": ("hoy", "today"),
+    "wpm_week": ("media de 7 días", "7-day average"),
+    "wpm_accuracy": ("precisión {}%", "accuracy {}%"),
+    "wpm_best": ("mejor racha {} {}", "best burst {} {}"),
+    "wpm_last": ("ÚLTIMA RACHA", "LAST BURST"),
+    "wpm_last_text": ("{} {} durante {} · {} · precisión {}%",
+                      "{} {} for {} · {} · accuracy {}%"),
+    "wpm_days": ("PPM POR DÍA (14 DÍAS)", "WPM PER DAY (14 DAYS)"),
+    "wpm_avg7": ("Media 7 días", "7-day average"),
+    "wpm_record": ("Récord", "Record"),
+    "wpm_acc7": ("Precisión 7 días", "7-day accuracy"),
+    "wpm_trend": ("Frente a la semana anterior", "Vs previous week"),
+    "wpm_presses": ("PULSACIONES", "KEY PRESSES"),
+    "wpm_note": ("Una palabra son 5 pulsaciones de carácter, el estándar de los test de "
+                 "mecanografía. Solo cuenta mientras escribes de seguido: una pausa de más de 2 s "
+                 "cierra la racha. La precisión cuenta cada borrado como un error. Escribiendo de "
+                 "forma natural el resultado suele quedar algo por debajo de un test.",
+                 "One word is 5 character presses, the standard used by typing tests. It only "
+                 "counts while you type continuously: a pause longer than 2 s ends the burst. "
+                 "Accuracy counts each backspace as an error. Natural typing usually comes out "
+                 "somewhat below a typing test."),
     "set_battery": ("BATERÍA", "BATTERY"),
     "set_lights": ("LUCES", "LIGHTS"),
     "set_use": ("USO", "USE"),
@@ -356,6 +395,10 @@ KEY_NAMES = (
     ["Ctrl", "Win", "Alt", "Space", "AltGr", "Fn", "Ctrl", "←", "↓", "→"],
 )
 KEY_COUNT = sum(len(row) for row in SCAN_LAYOUT)
+# Teclas que producen un caracter (letras, numeros, signos y espacio) y la de borrar.
+CHAR_CODES = {(c, 0) for c in [*range(0x02, 0x0E), *range(0x10, 0x1C), *range(0x1E, 0x2A),
+                               *range(0x2B, 0x36), 0x39]}
+BACKSPACE = (0x0E, 0)
 SCAN_INDEX = {code: i for i, code in enumerate(c for row in SCAN_LAYOUT for c in row) if code}
 KEY_LABELS = [name for row in KEY_NAMES for name in row]
 
@@ -825,6 +868,42 @@ def typing_stats(keys, usage, now=None):
             "trend": (sum(last) - sum(previous)) / sum(previous) * 100 if sum(previous) else None}
 
 
+def burst_wpm(entry):
+    """PPM de un dia o grupo de dias {chars, secs}: (caracteres / 5) / minutos."""
+    return entry["chars"] / 5 / (entry["secs"] / 60) if entry and entry["secs"] >= 30 else 0
+
+
+def merge_days(entries):
+    total = {"chars": 0, "secs": 0, "backs": 0}
+    for e in entries:
+        for k in total:
+            total[k] += e[k]
+    return total
+
+
+def accuracy(entry):
+    return max(0.0, 1 - entry["backs"] / entry["chars"]) * 100 if entry["chars"] else 0
+
+
+def wpm_level(wpm):
+    names = [lvl for lvl in WPM_LEVELS if wpm >= lvl[0]][-1]
+    return names[1 + lang_index()]
+
+
+def wpm_stats(typing, now=None):
+    """PPM de hoy, por dia (14 dias), media y precision de 7 dias, tendencia y record."""
+    now = time.time() if now is None else now
+    days = [day_key(now - n * DAY) for n in range(13, -1, -1)]
+    last = merge_days(typing[d] for d in days[7:] if d in typing)
+    previous = merge_days(typing[d] for d in days[:7] if d in typing)
+    record = max(((e.get("best", 0), d) for d, e in typing.items()), default=(0, None))
+    week, before = burst_wpm(last), burst_wpm(previous)
+    return {"days": days, "per_day": [round(burst_wpm(typing.get(d))) for d in days],
+            "today": typing.get(day_key(now)), "week": week, "week_acc": accuracy(last),
+            "trend": (week - before) / before * 100 if before and week else None,
+            "record": record}
+
+
 def when_text(ts, now=None):
     """'hoy hacia las 15:00' o 'manana hacia las 10:00'."""
     now = time.time() if now is None else now
@@ -946,6 +1025,9 @@ class Model(QObject):
         self.auto_write = 0.0
         self.usage = load_json(USAGE_FILE)  # {dia: [minutos de uso por hora]}
         self.keys = load_json(KEYS_FILE)    # {dia: [pulsaciones por tecla]}
+        self.typing = load_json(TYPING_FILE)    # {dia: {chars, secs, backs, best, bursts}}
+        self.burst = None                   # racha de escritura en curso
+        self.last_burst = None              # (ppm, segundos, inicio, precision)
         self.data_lock = threading.Lock()
         self.data_dirty = False
         self.raw_input = False              # ya llegaron pulsaciones de este teclado
@@ -1239,27 +1321,64 @@ class Model(QObject):
                 hours = self.usage.setdefault(day_key(now), [0] * 24)
                 hours[time.localtime(now).tm_hour] += 1
                 self.data_dirty = True
-            if CFG["heatmap"]:
-                if not down:
-                    self.pressed.discard(code)
-                elif code not in self.pressed:   # sin contar la repeticion automatica
-                    self.pressed.add(code)
-                    index = SCAN_INDEX.get(code)
-                    if index is not None:
-                        counts = self.keys.setdefault(day_key(now), [0] * KEY_COUNT)
-                        counts[index] += 1
-                        self.data_dirty = True
+            first = down and code not in self.pressed   # sin la repeticion automatica
+            if down:
+                self.pressed.add(code)
+            else:
+                self.pressed.discard(code)
+            if CFG["heatmap"] and first:
+                index = SCAN_INDEX.get(code)
+                if index is not None:
+                    counts = self.keys.setdefault(day_key(now), [0] * KEY_COUNT)
+                    counts[index] += 1
+                    self.data_dirty = True
+            if CFG["wpm"] and first and (code in CHAR_CODES or code == BACKSPACE):
+                self._typing_key(code == BACKSPACE, now)
         if was_idle and now - self.last_poll > 20:   # se desperto: leer ya
             self.wake.set()
 
+    def _typing_key(self, backspace, now):
+        """Suma una tecla a la racha de escritura (con data_lock tomado)."""
+        if self.burst is None or now - self.burst["last"] > BURST_GAP:
+            self._close_burst()
+            self.burst = {"start": now, "last": now, "chars": 0, "backs": 0}
+        self.burst["last"] = now
+        self.burst["backs" if backspace else "chars"] += 1
+
+    def _close_burst(self):
+        """Guarda la racha en curso si es lo bastante larga (con data_lock tomado)."""
+        burst, self.burst = self.burst, None
+        if burst is None:
+            return
+        secs = burst["last"] - burst["start"]
+        if burst["chars"] < BURST_MIN_CHARS or secs < BURST_MIN_SECS:
+            return
+        wpm = burst["chars"] / 5 / (secs / 60)
+        if wpm > 250:                       # teclas mantenidas o pulsadas sin escribir
+            return
+        day = self.typing.setdefault(day_key(burst["start"]),
+                                     {"chars": 0, "secs": 0, "backs": 0, "best": 0, "bursts": 0})
+        day["chars"] += burst["chars"]
+        day["secs"] = round(day["secs"] + secs, 1)
+        day["backs"] += burst["backs"]
+        day["bursts"] += 1
+        if secs >= BEST_MIN_SECS:
+            day["best"] = max(day["best"], round(wpm))
+        self.last_burst = (round(wpm), secs, burst["start"], accuracy(burst))
+        self.data_dirty = True
+
     def _save_activity(self):
         with self.data_lock:
+            if self.burst and time.time() - self.burst["last"] > BURST_GAP:
+                self._close_burst()
             if not self.data_dirty:
                 return
             oldest = day_key(time.time() - ACTIVITY_KEEP * DAY)
             self.usage = {k: v for k, v in self.usage.items() if k >= oldest}
             self.keys = {k: v for k, v in self.keys.items() if k >= oldest}
+            self.typing = {k: v for k, v in self.typing.items() if k >= oldest}
             usage, keys = json.dumps(self.usage), json.dumps(self.keys)
+            typing = json.dumps(self.typing)
             self.data_dirty = False
         os.makedirs(DATA_DIR, exist_ok=True)
         with open(USAGE_FILE, "w", encoding="utf-8") as f:
@@ -1267,6 +1386,8 @@ class Model(QObject):
         if CFG["heatmap"]:
             with open(KEYS_FILE, "w", encoding="utf-8") as f:
                 f.write(keys)
+        with open(TYPING_FILE, "w", encoding="utf-8") as f:
+            f.write(typing)
 
     def poll_interval(self):
         """En reposo se consulta menos; una pulsacion despierta la consulta al momento."""
@@ -1366,10 +1487,10 @@ class Model(QObject):
     # --- copia de seguridad -----------------------------------------------------
     def export_backup(self, path):
         with self.data_lock:
-            usage, keys = dict(self.usage), dict(self.keys)
+            usage, keys, typing = dict(self.usage), dict(self.keys), dict(self.typing)
         data = {"app": APP_NAME, "version": APP_VERSION, "created": time.time(),
                 "settings": dict(CFG), "profiles": self.profiles, "modes": self.modes,
-                "history": list(self.history), "usage": usage, "keys": keys}
+                "history": list(self.history), "usage": usage, "keys": keys, "typing": typing}
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
 
@@ -1389,6 +1510,7 @@ class Model(QObject):
         with self.data_lock:
             self.usage = dict(data.get("usage", {}))
             self.keys = dict(data.get("keys", {}))
+            self.typing = dict(data.get("typing", {}))
             self.data_dirty = True
         self._save_activity()
         self.settings_changed.emit()
@@ -1874,7 +1996,6 @@ class ReportView(QWidget):
         self.add_charges(box, history)
         self.add_usage(box)
         self.add_heatmap(box)
-        self.add_typing(box)
         self.add_export(box)
         box.addStretch()
         self.layout_.addWidget(self.body)
@@ -1921,23 +2042,6 @@ class ReportView(QWidget):
         box.addWidget(body_label(tr("rep_heat_top", top)))
         box.addWidget(body_label(tr("rep_heat_total", short_count(stats["today"]),
                                     short_count(stats["daily"])), MUTED))
-
-    def add_typing(self, box):
-        box.addWidget(section_label(tr("rep_typing")))
-        if not CFG["heatmap"]:
-            box.addWidget(body_label(tr("rep_typing_off"), MUTED))
-            return
-        with self.model.data_lock:
-            stats = typing_stats(self.model.keys, self.model.usage)
-        if not any(stats["per_day"]):
-            box.addWidget(body_label(tr("rep_heat_empty"), MUTED))
-            return
-        box.addWidget(body_label(tr("rep_typing_avg", short_count(stats["avg"]),
-                                    f"{stats['rate']:.0f}")))
-        if stats["trend"] is not None:
-            box.addWidget(body_label(tr("rep_typing_trend", f"{stats['trend']:+.0f}%"), MUTED))
-        box.addWidget(body_label(tr("rep_typing_days"), MUTED))
-        box.addWidget(DayBars(stats["per_day"], stats["days"]))
 
     def add_export(self, box):
         row = QHBoxLayout()
@@ -2027,6 +2131,103 @@ class ReportView(QWidget):
             box.addWidget(body_label(text))
 
 
+class TypingView(QWidget):
+    """Pestana de escritura: palabras por minuto dia a dia y pulsaciones."""
+
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+        self.layout_ = QVBoxLayout(self)
+        self.layout_.setContentsMargins(0, 0, 8, 0)
+        self.body = None
+
+    def refresh(self):
+        if self.body is not None:
+            self.layout_.removeWidget(self.body)
+            self.body.setParent(None)
+            self.body.deleteLater()
+        self.body = QWidget()
+        box = QVBoxLayout(self.body)
+        box.setContentsMargins(0, 0, 0, 0)
+        box.setSpacing(8)
+        if CFG["wpm"]:
+            self.add_wpm(box)
+        else:
+            box.addWidget(body_label(tr("wpm_off"), MUTED))
+            button = QPushButton(tr("wpm_enable"))
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.clicked.connect(lambda: self.model.save_settings({"wpm": True}))
+            box.addWidget(button)
+        self.add_typing(box)
+        box.addStretch()
+        self.layout_.addWidget(self.body)
+
+    def add_wpm(self, box):
+        with self.model.data_lock:
+            stats = wpm_stats(self.model.typing)
+            last = self.model.last_burst
+        unit = tr("wpm_unit")
+        today = stats["today"]
+        if not (today and burst_wpm(today)) and not stats["week"]:
+            box.addWidget(body_label(tr("wpm_none"), MUTED))
+            box.addWidget(body_label(tr("wpm_note"), MUTED))
+            return
+        if today and burst_wpm(today):
+            value, when, acc, best = burst_wpm(today), tr("wpm_today"), accuracy(today), today["best"]
+        else:
+            value, when, acc, best = stats["week"], tr("wpm_week"), stats["week_acc"], 0
+        details = [when, wpm_level(value), tr("wpm_accuracy", f"{acc:.0f}")]
+        if best:
+            details.append(tr("wpm_best", best, unit))
+        hero = QLabel(f"<span style='font-size:44px;font-weight:600;color:{TEXT}'>{value:.0f}</span>"
+                      f"<span style='font-size:16px;color:{MUTED}'> {unit}</span><br>"
+                      f"<span style='font-size:12px;color:{MUTED}'>{' · '.join(details)}</span>")
+        hero.setStyleSheet("font-family:'Segoe UI';")
+        box.addWidget(hero)
+
+        if last:
+            wpm, secs, start, acc = last
+            box.addWidget(section_label(tr("wpm_last")))
+            box.addWidget(body_label(tr("wpm_last_text", wpm, unit, hours_text(secs)
+                                        if secs >= 60 else f"{secs:.0f} s", ago(start),
+                                        f"{acc:.0f}")))
+
+        record, record_day = stats["record"]
+        tiles = (
+            (f"{stats['week']:.0f} {unit}" if stats["week"] else "-", tr("wpm_avg7")),
+            (f"{record} {unit}" if record else "-", tr("wpm_record") + (
+                f" · {record_day[8:10]}/{record_day[5:7]}" if record_day and record else "")),
+            (f"{stats['week_acc']:.0f}%" if stats["week"] else "-", tr("wpm_acc7")),
+            (f"{stats['trend']:+.0f}%" if stats["trend"] is not None else "-", tr("wpm_trend")),
+        )
+        grid = QGridLayout()
+        grid.setSpacing(6)
+        for n, (text, caption) in enumerate(tiles):
+            grid.addWidget(StatTile(text, caption), n // 2, n % 2)
+        box.addLayout(grid)
+        box.addWidget(section_label(tr("wpm_days")))
+        box.addWidget(DayBars(stats["per_day"], stats["days"]))
+        box.addWidget(body_label(tr("wpm_note"), MUTED))
+
+    def add_typing(self, box):
+        box.addWidget(section_label(tr("wpm_presses")))
+        if not CFG["heatmap"]:
+            box.addWidget(body_label(tr("rep_typing_off"), MUTED))
+            return
+        with self.model.data_lock:
+            stats = typing_stats(self.model.keys, self.model.usage)
+        if not any(stats["per_day"]):
+            box.addWidget(body_label(tr("rep_heat_empty"), MUTED))
+            return
+        box.addWidget(body_label(tr("rep_typing_avg", short_count(stats["avg"]),
+                                    f"{stats['rate']:.0f}")))
+        if stats["trend"] is not None:
+            box.addWidget(body_label(tr("rep_typing_trend", f"{stats['trend']:+.0f}%"), MUTED))
+        box.addWidget(body_label(tr("rep_typing_days"), MUTED))
+        box.addWidget(DayBars(stats["per_day"], stats["days"]))
+
+
+
 def export_html(path, model):
     """Informe autocontenido con los mismos datos que la pestana de informe."""
     esc = html.escape
@@ -2098,6 +2299,20 @@ def export_html(path, model):
         parts.append(table([(name, n) for name, n in top_keys(keys["totals"], 15)]))
     else:
         parts.append(f"<p class=muted>{esc(tr('rep_heat_off' if not CFG['heatmap'] else 'rep_heat_empty'))}</p>")
+    with model.data_lock:
+        speed = wpm_stats(model.typing)
+    parts.append(f"<h2>{esc(tr('tab_typing').upper())}</h2>")
+    if CFG["wpm"] and speed["week"]:
+        record, record_day = speed["record"]
+        parts.append(table([
+            (tr("wpm_avg7"), f"{speed['week']:.0f} {tr('wpm_unit')} · {wpm_level(speed['week'])}"),
+            (tr("wpm_acc7"), f"{speed['week_acc']:.0f}%"),
+            (tr("wpm_record"), f"{record} {tr('wpm_unit')} ({record_day})" if record else "-"),
+        ]))
+        parts.append(table([(d, f"{v} {tr('wpm_unit')}") for d, v in
+                            zip(speed["days"], speed["per_day"]) if v]))
+    else:
+        parts.append(f"<p class=muted>{esc(tr('wpm_off' if not CFG['wpm'] else 'wpm_none'))}</p>")
     parts.append(f"<p class=muted>{esc(tr('html_history'))}</p>")
 
     style = ("body{font-family:'Segoe UI',sans-serif;max-width:760px;margin:32px auto;padding:0 16px;"
@@ -2252,6 +2467,7 @@ class SettingsView(QWidget):
         box.addWidget(section_label(tr("set_use")))
         self.row(box, "break_minutes", self.spin("break_minutes", 0, 240, " min"))
         self.check(box, "heatmap")
+        self.check(box, "wpm")
 
         box.addWidget(section_label(tr("set_updates")))
         self.check(box, "check_updates")
@@ -2285,7 +2501,7 @@ class SettingsView(QWidget):
         for key in ("poll", "full_level", "break_minutes"):
             values[key] = f[key].value()
         for key in ("full_notify", "forecast_notify", "lock_off", "sched_on", "heatmap",
-                    "check_updates", "auto_update"):
+                    "wpm", "check_updates", "auto_update"):
             values[key] = f[key].isChecked()
         return values
 
@@ -2333,14 +2549,14 @@ class Panel(QWidget):
         tabs = QHBoxLayout()
         tabs.setSpacing(4)
         self.tab_buttons = []
-        for index in range(3):
-            button = QPushButton("⚙" if index == 2 else "")
+        for index in range(4):
+            button = QPushButton("⚙" if index == 3 else "")
             button.setCheckable(True)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setStyleSheet(
                 f"QPushButton{{background:transparent;border:none;color:{MUTED};"
                 "border-bottom:2px solid transparent;border-radius:0;padding:4px 10px;"
-                f"font:600 {15 if index == 2 else 12}px 'Segoe UI';}}"
+                f"font:600 {15 if index == 3 else 12}px 'Segoe UI';}}"
                 f"QPushButton:checked{{color:{TEXT};border-bottom:2px solid {ACCENT};}}"
                 f"QPushButton:hover{{color:{TEXT};}}")
             button.clicked.connect(lambda _, n=index: self.show_tab(n))
@@ -2391,10 +2607,13 @@ class Panel(QWidget):
 
         self.report = ReportView(model)
         self.report_scroll = scroll_area(self.report)
+        self.typing = TypingView(model)
+        self.typing_scroll = scroll_area(self.typing)
         self.settings = SettingsView(self)
         self.stack = QStackedWidget()
         self.stack.addWidget(main)
         self.stack.addWidget(self.report_scroll)
+        self.stack.addWidget(self.typing_scroll)
         self.stack.addWidget(scroll_area(self.settings))
         root.addWidget(self.stack)
         self.show_tab(0)
@@ -2475,9 +2694,9 @@ class Panel(QWidget):
             tile.setToolTip(tr("mode_tip"))
         for swatch in self.swatches:
             swatch.retranslate()
-        for button, key in zip(self.tab_buttons, ("tab_panel", "tab_report")):
+        for button, key in zip(self.tab_buttons, ("tab_panel", "tab_report", "tab_typing")):
             button.setText(tr(key))
-        self.tab_buttons[2].setToolTip(tr("settings"))
+        self.tab_buttons[3].setToolTip(tr("settings"))
         self.sync_update()
         self.rebuild_profiles()
         self.sync()
@@ -2498,10 +2717,12 @@ class Panel(QWidget):
         self.labels["light_mode"].setText(f"{tr('light_mode')}  ·  {current}")
         window = m.history_window()[1]
         self.labels["history"].setText(f"{tr('history')}  ·  {tr('last', human(window))}")
-        if self.stack.currentIndex() == 1:
-            bar = self.report_scroll.verticalScrollBar()
+        pages = {1: (self.report, self.report_scroll), 2: (self.typing, self.typing_scroll)}
+        if self.stack.currentIndex() in pages:
+            page, area = pages[self.stack.currentIndex()]
+            bar = area.verticalScrollBar()
             position = bar.value()
-            self.report.refresh()
+            page.refresh()
             QTimer.singleShot(0, lambda: bar.setValue(position))
         self.update()
 
@@ -2512,6 +2733,8 @@ class Panel(QWidget):
         if index == 1:
             self.report.refresh()
         elif index == 2:
+            self.typing.refresh()
+        elif index == 3:
             self.settings.build()           # valores al dia (por ejemplo tras importar)
 
     def animate(self):
@@ -2639,7 +2862,7 @@ class Panel(QWidget):
     def open_settings(self):
         if not self.isVisible():
             self.popup()
-        self.show_tab(2)
+        self.show_tab(3)
 
     # --- ventana ----------------------------------------------------------
     def paintEvent(self, _):
