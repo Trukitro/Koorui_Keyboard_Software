@@ -25,7 +25,9 @@ borra la pagina entera, asi que siempre se reescribe completa. Pagina 0:
 Requiere: pip install -r requirements.txt
 """
 import colorsys
+import csv
 import ctypes
+import html
 import json
 import math
 import os
@@ -35,18 +37,20 @@ import sys
 import threading
 import time
 import traceback
+import urllib.request
 import uuid
 import winreg
 from ctypes import wintypes
 
 import hid
-from PyQt6.QtCore import (QAbstractNativeEventFilter, QObject, QPointF, QRectF, Qt, QTime,
-                          QTimer, pyqtSignal)
-from PyQt6.QtGui import (QAction, QColor, QCursor, QFont, QFontMetrics, QIcon, QPainter,
-                         QPainterPath, QPen, QPixmap)
+from PyQt6.QtCore import (QAbstractNativeEventFilter, QObject, QPointF, QRectF, QStandardPaths,
+                          Qt, QTime, QTimer, QUrl, pyqtSignal)
+from PyQt6.QtGui import (QAction, QColor, QCursor, QDesktopServices, QFont, QFontMetrics,
+                         QIcon, QPainter, QPainterPath, QPen, QPixmap)
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QColorDialog, QComboBox, QDialog,
-                             QDialogButtonBox, QFormLayout, QGridLayout, QHBoxLayout,
-                             QInputDialog, QLabel, QLineEdit, QMenu, QPushButton, QSlider,
+                             QDialogButtonBox, QFileDialog, QFormLayout, QGridLayout, QHBoxLayout,
+                             QInputDialog, QLabel, QLineEdit, QMenu, QPushButton, QScrollArea,
+                             QSlider,
                              QSpinBox, QStackedWidget, QSystemTrayIcon, QTimeEdit,
                              QVBoxLayout, QWidget)
 
@@ -77,6 +81,8 @@ PROFILES_FILE = os.path.join(DATA_DIR, "profiles.json")
 HISTORY_FILE = os.path.join(DATA_DIR, "history.json")
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 AUTO_FILE = os.path.join(DATA_DIR, "auto.json")
+USAGE_FILE = os.path.join(DATA_DIR, "usage.json")      # minutos de uso por dia y hora
+KEYS_FILE = os.path.join(DATA_DIR, "keys.json")        # pulsaciones por dia y tecla
 LOG_FILE = os.path.join(DATA_DIR, "error.log")
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 
@@ -85,6 +91,14 @@ HISTORY_KEEP = 90 * DAY         # se descartan lecturas mas antiguas
 HISTORY_EVERY = 600             # sin cambios, una lectura cada 10 minutos
 HISTORY_GAP = 3 * HOUR          # un hueco mayor (teclado apagado) se dibuja punteado
 ACTIVE_GAP = 15 * 60            # lecturas mas separadas: el teclado estuvo en reposo
+IDLE_AFTER = 3 * 60             # sin pulsaciones durante este tiempo: teclado en reposo
+IDLE_POLL = 5 * 60              # intervalo de consulta mientras esta en reposo
+ACTIVITY_KEEP = 90             # dias de uso y pulsaciones que se conservan
+HEAT_DAYS = 30                 # dias que suma el mapa de calor
+
+APP_VERSION = "1.6.0"
+REPO = "Trukitro/Koorui_Keyboard_Software"
+UPDATE_EVERY = DAY
 
 BG, CARD, BORDER, TEXT, MUTED, ACCENT = "#15171c", "#1e2128", "#2c303a", "#e8eaf0", "#8a90a0", "#4da3ff"
 GREEN, BLUE = "#3fbf7f", "#2878d7"
@@ -92,7 +106,8 @@ GREEN, BLUE = "#3fbf7f", "#2878d7"
 # Ajustes del usuario (se cargan de settings.json al arrancar).
 DEFAULTS = {"lang": "es", "poll": 30, "low": 20, "critical": 10,
             "full_notify": True, "full_level": 100,
-            "lock_off": False, "sched_on": False, "sched_from": "23:00", "sched_to": "07:00"}
+            "lock_off": False, "sched_on": False, "sched_from": "23:00", "sched_to": "07:00",
+            "heatmap": False, "check_updates": True}
 AUTO_SETTLE = 10                # segundos de margen tras una escritura automatica
 CFG = dict(DEFAULTS)
 
@@ -156,6 +171,42 @@ STR = {
                  "Fully charged ({}%). You can unplug the cable."),
     "kb_title": ("Teclado KOORUI", "KOORUI keyboard"),
     "tab_panel": ("Panel", "Panel"),
+    "heatmap": ("Contar pulsaciones por tecla (mapa de calor)",
+                "Count key presses per key (heatmap)"),
+    "check_updates": ("Avisar de versiones nuevas", "Notify about new versions"),
+    "rep_usage": ("USO DEL TECLADO", "KEYBOARD USE"),
+    "rep_usage_today": ("Hoy: {} de uso · media de los días con uso (7 d): {}",
+                        "Today: {} of use · average on days used (7 d): {}"),
+    "rep_usage_none": ("Aún no hay datos de uso. Se registran los minutos en que escribes con este "
+                       "teclado.",
+                       "No usage data yet. The minutes you type on this keyboard are logged."),
+    "rep_usage_hours": ("Minutos de uso por hora del día (media de 7 días)",
+                        "Minutes of use per hour of day (7-day average)"),
+    "rep_heat": ("MAPA DE CALOR ({} DÍAS)", "HEATMAP ({} DAYS)"),
+    "rep_heat_off": ("Desactivado. Actívalo en Ajustes para contar cuántas veces pulsas cada "
+                     "tecla (solo el número, nunca lo que escribes).",
+                     "Off. Turn it on in Settings to count how often you press each key "
+                     "(only the count, never what you type)."),
+    "rep_heat_empty": ("Aún no hay pulsaciones contadas.", "No key presses counted yet."),
+    "rep_heat_top": ("Más usadas: {}", "Most used: {}"),
+    "rep_heat_total": ("Pulsaciones: hoy {} · media diaria {}", "Key presses: today {} · daily average {}"),
+    "rep_wear": ("DESGASTE DE LA BATERÍA", "BATTERY WEAR"),
+    "rep_wear_rows": ("Autonomía por mes con brillo {}", "Battery life per month at brightness {}"),
+    "rep_wear_wait": ("Hacen falta al menos dos meses con uso registrado a un mismo brillo para "
+                      "comparar.",
+                      "At least two months of logged use at the same brightness are needed "
+                      "to compare."),
+    "rep_export_csv": ("Exportar CSV", "Export CSV"),
+    "rep_export_html": ("Exportar informe HTML", "Export HTML report"),
+    "msg_exported": ("Guardado en {}", "Saved to {}"),
+    "msg_update": ("Hay una versión nueva: {}. Haz clic para descargarla.",
+                   "A new version is available: {}. Click to download it."),
+    "download_update": ("Descargar versión {}", "Download version {}"),
+    "html_title": ("Informe del teclado KOORUI", "KOORUI keyboard report"),
+    "html_generated": ("Generado el {}", "Generated on {}"),
+    "html_history": ("Historial completo de lecturas: exporta el CSV desde la app.",
+                     "Full reading history: export the CSV from the app."),
+    "csv_header": ("fecha;porcentaje;cargando;modo;brillo", "date,percent,charging,mode,brightness"),
     "tab_report": ("Informe", "Report"),
     "rep_forecast": ("PREVISIÓN", "FORECAST"),
     "rep_left": ("Al ritmo actual te queda {}.", "At the current rate you have {} left."),
@@ -204,6 +255,16 @@ WEEKDAYS_LONG = (("el lunes", "el martes", "el miércoles", "el jueves", "el vie
                   "on Saturday", "on Sunday"))
 
 
+MONTHS = (("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"),
+          ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"))
+
+
+def month_label(key):
+    """'2026-08' -> 'ago 2026'."""
+    year, month = key.split("-")
+    return f"{MONTHS[lang_index()][int(month) - 1]} {year}"
+
+
 def lang_index():
     return 1 if CFG["lang"] == "en" else 0
 
@@ -212,6 +273,30 @@ def tr(key, *args):
     text = STR[key][lang_index()]
     return text.format(*args) if args else text
 
+
+# Codigos de escaneo (codigo, extendida) de cada posicion de LAYOUT, en orden. None: sin tecla
+# (la rueda o la tecla Fn, que no llega al PC).
+SCAN_LAYOUT = (
+    [(0x01, 0)] + [(c, 0) for c in range(0x3B, 0x45)] + [(0x57, 0), (0x58, 0), (0x53, 1),
+                                                        None, None],
+    [(0x29, 0)] + [(c, 0) for c in range(0x02, 0x0F)] + [(0x47, 1)],
+    [(0x0F, 0)] + [(c, 0) for c in range(0x10, 0x1C)] + [(0x2B, 0), (0x49, 1)],
+    [(0x3A, 0)] + [(c, 0) for c in range(0x1E, 0x29)] + [(0x1C, 0), (0x51, 1)],
+    [(0x2A, 0)] + [(c, 0) for c in range(0x2C, 0x36)] + [(0x36, 0), (0x48, 1), (0x4F, 1)],
+    [(0x1D, 0), (0x5B, 1), (0x38, 0), (0x39, 0), (0x38, 1), None, (0x1D, 1), (0x4B, 1),
+     (0x50, 1), (0x4D, 1)],
+)
+KEY_NAMES = (
+    ["Esc"] + [f"F{n}" for n in range(1, 13)] + ["Del", "", ""],
+    list("`1234567890-=") + ["Backspace", "Home"],
+    ["Tab"] + list("QWERTYUIOP[]") + ["\\", "PgUp"],
+    ["Caps"] + list("ASDFGHJKL;'") + ["Enter", "PgDn"],
+    ["Shift"] + list("ZXCVBNM,./") + ["Shift", "↑", "End"],
+    ["Ctrl", "Win", "Alt", "Space", "AltGr", "Fn", "Ctrl", "←", "↓", "→"],
+)
+KEY_COUNT = sum(len(row) for row in SCAN_LAYOUT)
+SCAN_INDEX = {code: i for i, code in enumerate(c for row in SCAN_LAYOUT for c in row) if code}
+KEY_LABELS = [name for row in KEY_NAMES for name in row]
 
 # Teclado 75%: anchos de tecla por fila, en unidades (cada fila suma 16).
 LAYOUT = (
@@ -607,6 +692,81 @@ def charge_stats(history, now=None):
     }
 
 
+def day_key(ts):
+    return time.strftime("%Y-%m-%d", time.localtime(ts))
+
+
+def recent_days(data, days, now=None):
+    """Valores de un diccionario {dia: ...} de los ultimos `days` dias."""
+    now = time.time() if now is None else now
+    wanted = {day_key(now - n * DAY) for n in range(days)}
+    return [v for k, v in data.items() if k in wanted]
+
+
+def usage_stats(usage, now=None):
+    """Minutos de uso hoy, media de los dias con uso (7 dias) y media por hora del dia."""
+    now = time.time() if now is None else now
+    week = [d for d in recent_days(usage, 7, now) if sum(d)]
+    today = sum(usage.get(day_key(now), [0] * 24))
+    if not week:
+        return {"today": today, "daily": 0, "hours": [0] * 24, "days": 0}
+    hours = [sum(d[h] for d in week) / len(week) for h in range(24)]
+    return {"today": today, "daily": sum(map(sum, week)) / len(week), "hours": hours,
+            "days": len(week)}
+
+
+def key_stats(keys, now=None):
+    """Pulsaciones por tecla de los ultimos HEAT_DAYS dias, de hoy y media diaria."""
+    now = time.time() if now is None else now
+    days = recent_days(keys, HEAT_DAYS, now)
+    totals = [sum(d[i] for d in days if i < len(d)) for i in range(KEY_COUNT)]
+    used = [sum(d) for d in days if sum(d)]
+    return {"totals": totals, "today": sum(keys.get(day_key(now), [])),
+            "daily": sum(used) / len(used) if used else 0}
+
+
+def top_keys(totals, count=5):
+    ranked = sorted(range(len(totals)), key=lambda i: totals[i], reverse=True)
+    return [(KEY_LABELS[i], totals[i]) for i in ranked[:count] if totals[i]]
+
+
+def wear_by_month(history):
+    """(brillo mas usado, [(mes, autonomia en horas)]) de los meses con datos suficientes."""
+    groups = {}
+    for a, b in active_pairs(history):
+        if len(a) < 5 or a[4] is None:
+            continue
+        key = (time.strftime("%Y-%m", time.localtime(a[0])), a[4])
+        hours, drop = groups.get(key, (0.0, 0))
+        groups[key] = (hours + (b[0] - a[0]) / HOUR, drop + a[1] - b[1])
+    if not groups:
+        return None, []
+    per_bright = {}
+    for (_, bright), (hours, _) in groups.items():
+        per_bright[bright] = per_bright.get(bright, 0) + hours
+    bright = max(per_bright, key=per_bright.get)
+    months = [(month, 100 * h / d) for (month, b), (h, d) in sorted(groups.items())
+              if b == bright and h >= 2 and d >= 3]
+    return bright, months
+
+
+def short_count(n):
+    return f"{n / 1000:.1f}k" if n >= 1000 else str(round(n))
+
+
+def export_csv(path, history):
+    """Historial de lecturas; separador ';' en espanol (Excel en espanol lo espera asi)."""
+    sep = "," if CFG["lang"] == "en" else ";"
+    with open(path, "w", newline="", encoding="utf-8-sig") as f:
+        out = csv.writer(f, delimiter=sep)
+        out.writerow(tr("csv_header").split(sep))
+        for entry in history:
+            mode, bright = (entry[3], entry[4]) if len(entry) >= 5 else (None, None)
+            out.writerow([time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(entry[0])),
+                          entry[1], entry[2], "" if mode is None else mode,
+                          "" if bright is None else bright])
+
+
 def hours_text(seconds):
     """Duracion de uso siempre en horas: '41 h' o '25 min'."""
     if seconds < HOUR:
@@ -684,6 +844,7 @@ class Model(QObject):
     message = pyqtSignal(str)
     profiles_changed = pyqtSignal()
     settings_changed = pyqtSignal()
+    update_found = pyqtSignal(str, str)     # version, enlace
 
     def __init__(self):
         super().__init__()
@@ -700,8 +861,19 @@ class Model(QObject):
         self.auto = load_json(AUTO_FILE)    # apagado automatico: activo y brillo a restaurar
         self.overridden = False             # el usuario encendio las luces durante el apagado
         self.auto_write = 0.0
+        self.usage = load_json(USAGE_FILE)  # {dia: [minutos de uso por hora]}
+        self.keys = load_json(KEYS_FILE)    # {dia: [pulsaciones por tecla]}
+        self.data_lock = threading.Lock()
+        self.data_dirty = False
+        self.raw_input = False              # ya llegaron pulsaciones de este teclado
+        self.last_activity = 0.0
+        self.last_minute = 0
+        self.last_poll = 0.0
+        self.pressed = set()
+        self.update = None                  # (version, enlace) si hay una version nueva
         self.wake = threading.Event()
         threading.Thread(target=self._loop, daemon=True).start()
+        threading.Thread(target=self._update_loop, daemon=True).start()
 
     # --- lectura comoda ---------------------------------------------------
     def value(self, off, default=0):
@@ -803,6 +975,13 @@ class Model(QObject):
 
     # --- ajustes ----------------------------------------------------------
     def save_settings(self, values):
+        if CFG["heatmap"] and not values.get("heatmap", True):   # al desactivarlo se borra
+            with self.data_lock:
+                self.keys = {}
+            try:
+                os.remove(KEYS_FILE)
+            except OSError:
+                pass
         CFG.update(values)
         save_json(SETTINGS_FILE, CFG)
         self.settings_changed.emit()
@@ -946,14 +1125,89 @@ class Model(QObject):
                 self.page = page
         self.changed.emit()
 
+    # --- actividad del teclado ------------------------------------------------
+    def key_event(self, code, down):
+        """Una pulsacion de este teclado. code: (codigo de escaneo, extendida)."""
+        now = time.time()
+        self.raw_input = True
+        was_idle = now - self.last_activity > IDLE_AFTER
+        self.last_activity = now
+        with self.data_lock:
+            minute = int(now // 60)
+            if minute != self.last_minute:      # un minuto con actividad = un minuto de uso
+                self.last_minute = minute
+                hours = self.usage.setdefault(day_key(now), [0] * 24)
+                hours[time.localtime(now).tm_hour] += 1
+                self.data_dirty = True
+            if CFG["heatmap"]:
+                if not down:
+                    self.pressed.discard(code)
+                elif code not in self.pressed:   # sin contar la repeticion automatica
+                    self.pressed.add(code)
+                    index = SCAN_INDEX.get(code)
+                    if index is not None:
+                        counts = self.keys.setdefault(day_key(now), [0] * KEY_COUNT)
+                        counts[index] += 1
+                        self.data_dirty = True
+        if was_idle and now - self.last_poll > 20:   # se desperto: leer ya
+            self.wake.set()
+
+    def _save_activity(self):
+        with self.data_lock:
+            if not self.data_dirty:
+                return
+            oldest = day_key(time.time() - ACTIVITY_KEEP * DAY)
+            self.usage = {k: v for k, v in self.usage.items() if k >= oldest}
+            self.keys = {k: v for k, v in self.keys.items() if k >= oldest}
+            usage, keys = json.dumps(self.usage), json.dumps(self.keys)
+            self.data_dirty = False
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(USAGE_FILE, "w", encoding="utf-8") as f:
+            f.write(usage)
+        if CFG["heatmap"]:
+            with open(KEYS_FILE, "w", encoding="utf-8") as f:
+                f.write(keys)
+
+    def poll_interval(self):
+        """En reposo se consulta menos; una pulsacion despierta la consulta al momento."""
+        idle = (self.raw_input and not self.charging
+                and time.time() - self.last_activity > IDLE_AFTER)
+        return max(CFG["poll"], IDLE_POLL) if idle else CFG["poll"]
+
     def _loop(self):
         while True:
             try:
+                self.last_poll = time.time()
                 self._poll()
+                self._save_activity()
             except Exception:
                 log_error()
-            self.wake.wait(CFG["poll"])
+            self.wake.wait(self.poll_interval())
             self.wake.clear()
+
+    # --- versiones nuevas -------------------------------------------------------
+    def check_update(self):
+        request = urllib.request.Request(
+            f"https://api.github.com/repos/{REPO}/releases/latest",
+            headers={"User-Agent": APP_NAME, "Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(request, timeout=15) as response:
+            release = json.load(response)
+        tag = release.get("tag_name", "")
+        latest = tuple(int(n) for n in re.findall(r"\d+", tag)[:3])
+        if latest > tuple(int(n) for n in APP_VERSION.split(".")):
+            if self.update is None or self.update[0] != tag:
+                self.update = (tag, release.get("html_url", f"https://github.com/{REPO}"))
+                self.update_found.emit(*self.update)
+
+    def _update_loop(self):
+        time.sleep(60)                      # sin prisa al arrancar Windows
+        while True:
+            if CFG["check_updates"]:
+                try:
+                    self.check_update()
+                except Exception:
+                    pass                    # sin conexion: se intenta de nuevo manana
+            time.sleep(UPDATE_EVERY)
 
 
 # --- piezas del panel -----------------------------------------------------------
@@ -1311,6 +1565,68 @@ class AutonomyRow(QWidget):
                    Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, self.detail)
 
 
+class UsageBars(QWidget):
+    """Minutos de uso medios por hora del dia."""
+
+    def __init__(self, hours):
+        super().__init__()
+        self.hours = hours
+        self.setFixedHeight(64)
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        top = max(self.hours) or 1
+        width = self.width() / 24
+        plot = self.height() - 16
+        p.setPen(Qt.PenStyle.NoPen)
+        for h, minutes in enumerate(self.hours):
+            height = max(2.0, plot * minutes / top) if minutes else 2.0
+            p.setBrush(QColor(ACCENT if minutes else BORDER))
+            p.drawRoundedRect(QRectF(h * width + 1.5, plot - height, width - 3, height), 2, 2)
+        p.setPen(QColor(MUTED))
+        p.setFont(ui_font(10))
+        for h in (0, 6, 12, 18):
+            p.drawText(QRectF(h * width, plot + 2, 40, 14), Qt.AlignmentFlag.AlignLeft, f"{h}h")
+
+
+def heat_color(t):
+    """Azul (poco) a rojo (mucho)."""
+    if t <= 0:
+        return QColor(48, 52, 62)
+    return QColor.fromHsvF(0.66 * (1 - t), 0.85, 0.45 + 0.55 * t)
+
+
+class HeatmapView(QWidget):
+    """Teclado en miniatura coloreado segun cuantas veces se pulsa cada tecla."""
+
+    def __init__(self, totals):
+        super().__init__()
+        self.totals = totals
+        self.setFixedHeight(118)
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(QPen(QColor(BORDER), 1))
+        p.setBrush(QColor("#0f1115"))
+        p.drawRoundedRect(QRectF(0.5, 0.5, self.width() - 1, self.height() - 1), 10, 10)
+        top = max(self.totals) or 1
+        pad = 8
+        unit = (self.width() - 2 * pad) / 16
+        row_h = (self.height() - 2 * pad) / len(LAYOUT)
+        p.setPen(Qt.PenStyle.NoPen)
+        i = 0
+        for r, widths in enumerate(LAYOUT):
+            x = 0.0
+            for w in widths:
+                p.setBrush(heat_color((self.totals[i] / top) ** 0.5))
+                p.drawRoundedRect(QRectF(pad + x * unit + 1.2, pad + r * row_h + 1.2,
+                                         w * unit - 2.4, row_h - 2.4), 3, 3)
+                x += w
+                i += 1
+
+
 class StatTile(QLabel):
     def __init__(self, value, caption):
         super().__init__(f"<div style='font-size:17px;font-weight:600;color:{TEXT}'>{value}</div>"
@@ -1341,9 +1657,66 @@ class ReportView(QWidget):
         history = list(self.model.history)
         self.add_forecast(box)
         self.add_autonomy(box, history)
+        self.add_wear(box, history)
         self.add_charges(box, history)
+        self.add_usage(box)
+        self.add_heatmap(box)
+        self.add_export(box)
         box.addStretch()
         self.layout_.addWidget(self.body)
+
+    def add_wear(self, box, history):
+        box.addWidget(section_label(tr("rep_wear")))
+        bright, months = wear_by_month(history)
+        if len(months) < 2:
+            box.addWidget(body_label(tr("rep_wear_wait"), MUTED))
+            return
+        box.addWidget(body_label(tr("rep_wear_rows", bright), MUTED))
+        first = months[0][1]
+        longest = max(life for _, life in months)
+        for month, life in months[-6:]:
+            change = (life - first) / first * 100
+            detail = f"~{hours_text(life * HOUR)}" + (f" · {change:+.0f}%" if month != months[0][0]
+                                                      else "")
+            box.addWidget(AutonomyRow(month_label(month), life, longest, detail))
+
+    def add_usage(self, box):
+        box.addWidget(section_label(tr("rep_usage")))
+        with self.model.data_lock:
+            stats = usage_stats(self.model.usage)
+        if not stats["days"]:
+            box.addWidget(body_label(tr("rep_usage_none"), MUTED))
+            return
+        box.addWidget(body_label(tr("rep_usage_today", hours_text(stats["today"] * 60),
+                                    hours_text(stats["daily"] * 60))))
+        box.addWidget(body_label(tr("rep_usage_hours"), MUTED))
+        box.addWidget(UsageBars(stats["hours"]))
+
+    def add_heatmap(self, box):
+        box.addWidget(section_label(tr("rep_heat", HEAT_DAYS)))
+        if not CFG["heatmap"]:
+            box.addWidget(body_label(tr("rep_heat_off"), MUTED))
+            return
+        with self.model.data_lock:
+            stats = key_stats(self.model.keys)
+        if not any(stats["totals"]):
+            box.addWidget(body_label(tr("rep_heat_empty"), MUTED))
+            return
+        box.addWidget(HeatmapView(stats["totals"]))
+        top = ", ".join(f"{name} {short_count(n)}" for name, n in top_keys(stats["totals"]))
+        box.addWidget(body_label(tr("rep_heat_top", top)))
+        box.addWidget(body_label(tr("rep_heat_total", short_count(stats["today"]),
+                                    short_count(stats["daily"])), MUTED))
+
+    def add_export(self, box):
+        row = QHBoxLayout()
+        for key, action in (("rep_export_csv", "export_csv"), ("rep_export_html", "export_html")):
+            button = QPushButton(tr(key))
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.clicked.connect(lambda _, a=action: getattr(self.window(), a)())
+            row.addWidget(button)
+        box.addSpacing(6)
+        box.addLayout(row)
 
     def add_forecast(self, box):
         m = self.model
@@ -1423,6 +1796,95 @@ class ReportView(QWidget):
             box.addWidget(body_label(text))
 
 
+def export_html(path, model):
+    """Informe autocontenido con los mismos datos que la pestana de informe."""
+    esc = html.escape
+    history = list(model.history)
+    parts = [f"<h1>{esc(tr('html_title'))}</h1>",
+             f"<p class=muted>{esc(tr('html_generated', time.strftime('%Y-%m-%d %H:%M')))}"
+             f" · v{APP_VERSION}</p>",
+             f"<p><b>{esc(tr('battery'))}:</b> {esc(model.battery_text())}</p>"]
+
+    def table(rows, header=None):
+        out = "<table>"
+        if header:
+            out += "<tr>" + "".join(f"<th>{esc(str(h))}</th>" for h in header) + "</tr>"
+        for row in rows:
+            out += "<tr>" + "".join(f"<td>{esc(str(c))}</td>" for c in row) + "</tr>"
+        return out + "</table>"
+
+    groups = autonomy_by_brightness(history)
+    parts.append(f"<h2>{esc(tr('rep_autonomy'))}</h2>")
+    if groups:
+        rows = []
+        for bright in sorted(groups, reverse=True):
+            hours, drop = groups[bright]
+            label = tr("rep_bright", bright) if bright else tr("rep_off")
+            if hours >= 2 and drop >= 3:
+                rows.append((label, tr("rep_life", hours_text(100 * hours / drop * HOUR),
+                                       f"{drop / hours:.1f}")))
+            else:
+                rows.append((label, tr("rep_measuring", hours_text(hours * HOUR))))
+        parts.append(table(rows))
+    else:
+        parts.append(f"<p class=muted>{esc(tr('rep_no_usage'))}</p>")
+
+    bright, months = wear_by_month(history)
+    parts.append(f"<h2>{esc(tr('rep_wear'))}</h2>")
+    if len(months) >= 2:
+        parts.append(f"<p class=muted>{esc(tr('rep_wear_rows', bright))}</p>")
+        parts.append(table([(month_label(m), "~" + hours_text(life * HOUR)) for m, life in months]))
+    else:
+        parts.append(f"<p class=muted>{esc(tr('rep_wear_wait'))}</p>")
+
+    stats = charge_stats(history)
+    parts.append(f"<h2>{esc(tr('rep_charges'))}</h2>")
+    parts.append(table([
+        (tr("rep_per_week"), f"{stats['per_week']:.1f}" if stats["per_week"] is not None else "-"),
+        (tr("rep_between"), human(stats["between"]) if stats["between"] else "-"),
+        (tr("rep_full_time"), "~" + human(stats["full_time"]) if stats["full_time"] else "-"),
+    ]))
+    if stats["sessions"]:
+        parts.append(table([(time.strftime("%Y-%m-%d %H:%M", time.localtime(a)), f"{f}%", f"{t}%",
+                             tr("rep_in_progress") if o else human(max(60, b - a)))
+                            for a, b, f, t, o in reversed(stats["sessions"])]))
+
+    with model.data_lock:
+        usage = usage_stats(model.usage)
+        keys = key_stats(model.keys)
+    parts.append(f"<h2>{esc(tr('rep_usage'))}</h2>")
+    if usage["days"]:
+        parts.append(f"<p>{esc(tr('rep_usage_today', hours_text(usage['today'] * 60), hours_text(usage['daily'] * 60)))}</p>")
+        top = max(usage["hours"]) or 1
+        bars = "".join(f"<div class=bar title='{h}h: {m:.0f} min'><span style='height:{m / top * 100:.0f}%'>"
+                       f"</span><i>{h}</i></div>" for h, m in enumerate(usage["hours"]))
+        parts.append(f"<p class=muted>{esc(tr('rep_usage_hours'))}</p><div class=bars>{bars}</div>")
+    else:
+        parts.append(f"<p class=muted>{esc(tr('rep_usage_none'))}</p>")
+
+    parts.append(f"<h2>{esc(tr('rep_heat', HEAT_DAYS))}</h2>")
+    if CFG["heatmap"] and any(keys["totals"]):
+        parts.append(table([(name, n) for name, n in top_keys(keys["totals"], 15)]))
+    else:
+        parts.append(f"<p class=muted>{esc(tr('rep_heat_off' if not CFG['heatmap'] else 'rep_heat_empty'))}</p>")
+    parts.append(f"<p class=muted>{esc(tr('html_history'))}</p>")
+
+    style = ("body{font-family:'Segoe UI',sans-serif;max-width:760px;margin:32px auto;padding:0 16px;"
+             "color:#1d2027;background:#fff}h1{font-size:24px}h2{font-size:15px;margin-top:28px;"
+             "letter-spacing:.5px;color:#4a5060}table{border-collapse:collapse;width:100%}"
+             "td,th{border-bottom:1px solid #e3e5ea;padding:6px 8px;text-align:left;font-size:14px}"
+             ".muted{color:#6b7180;font-size:13px}.bars{display:flex;gap:3px;height:90px;"
+             "align-items:flex-end}.bar{flex:1;height:100%;display:flex;flex-direction:column;"
+             "justify-content:flex-end;align-items:center}.bar span{display:block;width:100%;"
+             "background:#4da3ff;border-radius:2px;min-height:2px}.bar i{font-size:9px;"
+             "color:#6b7180;font-style:normal}")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(f"<!doctype html><html lang='{CFG['lang']}'><meta charset='utf-8'>"
+                f"<meta name='viewport' content='width=device-width,initial-scale=1'>"
+                f"<title>{esc(tr('html_title'))}</title><style>{style}</style><body>"
+                + "".join(parts) + "</body></html>")
+
+
 class ModeDialog(QDialog):
     def __init__(self, parent, mode, name, effect):
         super().__init__(parent)
@@ -1466,6 +1928,10 @@ class SettingsDialog(QDialog):
         self.sched_on.setChecked(CFG["sched_on"])
         self.sched_from = self.clock(CFG["sched_from"])
         self.sched_to = self.clock(CFG["sched_to"])
+        self.heatmap = QCheckBox()
+        self.heatmap.setChecked(CFG["heatmap"])
+        self.check_updates = QCheckBox()
+        self.check_updates.setChecked(CFG["check_updates"])
         hours = QHBoxLayout()
         hours.addWidget(self.sched_from)
         hours.addWidget(QLabel("-"))
@@ -1482,6 +1948,8 @@ class SettingsDialog(QDialog):
         form.addRow(tr("lock_off"), self.lock_off)
         form.addRow(tr("sched_on"), self.sched_on)
         form.addRow(tr("sched_range"), hours)
+        form.addRow(tr("heatmap"), self.heatmap)
+        form.addRow(tr("check_updates"), self.check_updates)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
                                    | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
@@ -1511,7 +1979,9 @@ class SettingsDialog(QDialog):
                 "full_level": self.full_level.value(),
                 "lock_off": self.lock_off.isChecked(), "sched_on": self.sched_on.isChecked(),
                 "sched_from": self.sched_from.time().toString("HH:mm"),
-                "sched_to": self.sched_to.time().toString("HH:mm")}
+                "sched_to": self.sched_to.time().toString("HH:mm"),
+                "heatmap": self.heatmap.isChecked(),
+                "check_updates": self.check_updates.isChecked()}
 
 
 class Panel(QWidget):
@@ -1605,9 +2075,19 @@ class Panel(QWidget):
         self.speed = self.slider_row(body, "speed", OFF_SPEED)
 
         self.report = ReportView(model)
+        self.report_scroll = QScrollArea()
+        self.report_scroll.setWidget(self.report)
+        self.report_scroll.setWidgetResizable(True)
+        self.report_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.report_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.report_scroll.setStyleSheet(
+            "QScrollArea,QScrollArea>QWidget>QWidget{background:transparent;}"
+            "QScrollBar:vertical{width:6px;background:transparent;margin:0;}"
+            f"QScrollBar::handle:vertical{{background:{BORDER};border-radius:3px;min-height:30px;}}"
+            "QScrollBar::add-line,QScrollBar::sub-line{height:0;}")
         self.stack = QStackedWidget()
         self.stack.addWidget(main)
-        self.stack.addWidget(self.report)
+        self.stack.addWidget(self.report_scroll)
         root.addWidget(self.stack)
         self.show_tab(0)
 
@@ -1693,7 +2173,10 @@ class Panel(QWidget):
         window = m.history_window()[1]
         self.labels["history"].setText(f"{tr('history')}  ·  {tr('last', human(window))}")
         if self.stack.currentIndex() == 1:
+            bar = self.report_scroll.verticalScrollBar()
+            position = bar.value()
             self.report.refresh()
+            QTimer.singleShot(0, lambda: bar.setValue(position))
         self.update()
 
     def show_tab(self, index):
@@ -1757,6 +2240,25 @@ class Panel(QWidget):
         elif chosen == delete:
             self.model.delete_profile(index)
 
+    def save_path(self, name, pattern):
+        folder = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation)
+        path, _ = self.modal(lambda: QFileDialog.getSaveFileName(
+            self, tr("tab_report"), os.path.join(folder, name), pattern))
+        return path
+
+    def export_csv(self):
+        path = self.save_path(f"koorui-{day_key(time.time())}.csv", "CSV (*.csv)")
+        if path:
+            export_csv(path, list(self.model.history))
+            self.model.message.emit(tr("msg_exported", path))
+
+    def export_html(self):
+        path = self.save_path(f"koorui-{day_key(time.time())}.html", "HTML (*.html)")
+        if path:
+            export_html(path, self.model)
+            self.model.message.emit(tr("msg_exported", path))
+            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
     def open_settings(self):
         dlg = SettingsDialog(self)
         if self.modal(dlg.exec):
@@ -1812,12 +2314,17 @@ class Tray(QSystemTrayIcon):
         model.changed.connect(self.sync)
         model.settings_changed.connect(self.build_menu)
         model.message.connect(lambda text: self.showMessage(tr("kb_title"), text))
+        model.update_found.connect(self.on_update)
+        self.messageClicked.connect(self.open_update)
         self.build_menu()
         self.sync()
 
     def build_menu(self):
         menu = self.menu
         menu.clear()
+        if self.model.update:
+            menu.addAction(tr("download_update", self.model.update[0]), self.open_update)
+            menu.addSeparator()
         menu.addAction(tr("open_panel"), self.panel.popup)
         self.profiles = menu.addMenu(tr("tray_profiles"))
         self.profiles.aboutToShow.connect(self.fill_profiles)
@@ -1829,6 +2336,14 @@ class Tray(QSystemTrayIcon):
         menu.addAction(auto)
         menu.addSeparator()
         menu.addAction(tr("quit"), QApplication.quit)
+
+    def on_update(self, version, _):
+        self.build_menu()
+        self.showMessage(tr("kb_title"), tr("msg_update", version))
+
+    def open_update(self):
+        if self.model.update:
+            QDesktopServices.openUrl(QUrl(self.model.update[1]))
 
     def fill_profiles(self):
         self.profiles.clear()
@@ -1856,20 +2371,97 @@ class Tray(QSystemTrayIcon):
         self.setToolTip(f"KOORUI · {tr('battery')} {m.battery_text()}\n{tr('lights')}: {lights}")
 
 
-class LockWatcher(QAbstractNativeEventFilter):
-    """Avisa al modelo cuando la sesion de Windows se bloquea o desbloquea."""
+class RAWINPUTDEVICE(ctypes.Structure):
+    _fields_ = [("usUsagePage", wintypes.USHORT), ("usUsage", wintypes.USHORT),
+                ("dwFlags", wintypes.DWORD), ("hwndTarget", wintypes.HWND)]
+
+
+class RAWINPUTHEADER(ctypes.Structure):
+    _fields_ = [("dwType", wintypes.DWORD), ("dwSize", wintypes.DWORD),
+                ("hDevice", wintypes.HANDLE), ("wParam", wintypes.WPARAM)]
+
+
+class RAWKEYBOARD(ctypes.Structure):
+    _fields_ = [("MakeCode", wintypes.USHORT), ("Flags", wintypes.USHORT),
+                ("Reserved", wintypes.USHORT), ("VKey", wintypes.USHORT),
+                ("Message", wintypes.UINT), ("ExtraInformation", wintypes.ULONG)]
+
+
+class RAWINPUTKEYBOARD(ctypes.Structure):
+    _fields_ = [("header", RAWINPUTHEADER), ("keyboard", RAWKEYBOARD)]
+
+
+user32 = ctypes.windll.user32
+user32.GetRawInputData.argtypes = [wintypes.HANDLE, wintypes.UINT, ctypes.c_void_p,
+                                   ctypes.POINTER(wintypes.UINT), wintypes.UINT]
+user32.GetRawInputData.restype = wintypes.UINT
+user32.GetRawInputDeviceInfoW.argtypes = [wintypes.HANDLE, wintypes.UINT, ctypes.c_void_p,
+                                          ctypes.POINTER(wintypes.UINT)]
+user32.GetRawInputDeviceInfoW.restype = wintypes.UINT
+
+
+def is_koorui_device(name):
+    name = name.upper()
+    return f"VID_{VID:04X}" in name or f"VID&02{BT_VID:04X}_PID&{BT_PID:04X}" in name
+
+
+class NativeWatcher(QAbstractNativeEventFilter):
+    """Mensajes de Windows: bloqueo de sesion y pulsaciones de este teclado (Raw Input).
+
+    De cada pulsacion solo se usa que teclado la envio y, si el mapa de calor esta activo,
+    que tecla fue, para sumar uno a su contador. No se guarda lo que se escribe.
+    """
 
     WM_WTSSESSION_CHANGE, WTS_SESSION_LOCK, WTS_SESSION_UNLOCK = 0x02B1, 7, 8
+    WM_INPUT, RID_INPUT, RIDI_DEVICENAME, RIM_TYPEKEYBOARD = 0x00FF, 0x10000003, 0x20000007, 1
+    RIDEV_INPUTSINK, RI_KEY_BREAK, RI_KEY_E0 = 0x100, 1, 2
 
     def __init__(self, model, hwnd):
         super().__init__()
         self.model = model
+        self.devices = {}               # handle -> es este teclado
         ctypes.windll.wtsapi32.WTSRegisterSessionNotification(wintypes.HWND(hwnd), 0)
+        keyboards = RAWINPUTDEVICE(0x01, 0x06, self.RIDEV_INPUTSINK, hwnd)
+        user32.RegisterRawInputDevices(ctypes.byref(keyboards), 1,
+                                       ctypes.sizeof(RAWINPUTDEVICE))
+
+    def is_ours(self, handle):
+        if handle not in self.devices:
+            size = wintypes.UINT(0)
+            user32.GetRawInputDeviceInfoW(handle, self.RIDI_DEVICENAME, None, ctypes.byref(size))
+            name = ctypes.create_unicode_buffer(size.value + 1)
+            user32.GetRawInputDeviceInfoW(handle, self.RIDI_DEVICENAME, name, ctypes.byref(size))
+            self.devices[handle] = is_koorui_device(name.value)
+        return self.devices[handle]
+
+    def raw_input(self, lparam):
+        size = wintypes.UINT(0)
+        header = ctypes.sizeof(RAWINPUTHEADER)
+        handle = wintypes.HANDLE(lparam)
+        user32.GetRawInputData(handle, self.RID_INPUT, None, ctypes.byref(size), header)
+        if size.value < ctypes.sizeof(RAWINPUTKEYBOARD):
+            return
+        buffer = ctypes.create_string_buffer(size.value)
+        if user32.GetRawInputData(handle, self.RID_INPUT, buffer, ctypes.byref(size),
+                                  header) != size.value:
+            return
+        data = RAWINPUTKEYBOARD.from_buffer_copy(buffer)
+        if (data.header.dwType != self.RIM_TYPEKEYBOARD or not data.header.hDevice
+                or not self.is_ours(data.header.hDevice)):
+            return
+        flags = data.keyboard.Flags
+        self.model.key_event((data.keyboard.MakeCode, int(bool(flags & self.RI_KEY_E0))),
+                             not flags & self.RI_KEY_BREAK)
 
     def nativeEventFilter(self, event_type, message):
         if bytes(event_type) == b"windows_generic_MSG":
             msg = wintypes.MSG.from_address(int(message))
-            if msg.message == self.WM_WTSSESSION_CHANGE:
+            if msg.message == self.WM_INPUT:
+                try:
+                    self.raw_input(msg.lParam)
+                except Exception:
+                    log_error()
+            elif msg.message == self.WM_WTSSESSION_CHANGE:
                 if msg.wParam == self.WTS_SESSION_LOCK:
                     self.model.locked = True
                 elif msg.wParam == self.WTS_SESSION_UNLOCK:
@@ -1896,12 +2488,13 @@ def main():
         f"QMenu{{background:{CARD};color:{TEXT};border:1px solid {BORDER};padding:4px;}}"
         f"QMenu::item{{padding:5px 22px;}} QMenu::item:selected{{background:{ACCENT};}}"
         f"QMenu::item:disabled{{color:{MUTED};}}"
-        f"QToolTip{{background:{CARD};color:{TEXT};border:1px solid {BORDER};}}")
+        f"QToolTip{{background:{CARD};color:{TEXT};border:1px solid {BORDER};}}"
+        f"QPushButton:hover{{border-color:{ACCENT};}}")
     model = Model()
     panel = Panel(model)
     tray = Tray(model, panel)
     tray.show()
-    watcher = LockWatcher(model, int(panel.winId()))
+    watcher = NativeWatcher(model, int(panel.winId()))
     app.installNativeEventFilter(watcher)
     auto = QTimer()
     auto.timeout.connect(model.auto_tick)

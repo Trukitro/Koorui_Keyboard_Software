@@ -1,9 +1,11 @@
 ; Instalador de Koorui Keyboard (Inno Setup 6).
-; Compilar con:  iscc installer\koorui.iss
+; Compilar con:  iscc installer\koorui.iss   (o /DAppVersion=x.y.z para otra version)
 ; Requiere haber generado antes dist\KooruiKeyboard.exe con PyInstaller.
 
 #define AppName "Koorui Keyboard"
-#define AppVersion "1.5.0"
+#ifndef AppVersion
+  #define AppVersion "1.6.0"
+#endif
 #define AppExe "KooruiKeyboard.exe"
 
 [Setup]
