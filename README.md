@@ -37,12 +37,23 @@ KOORUI no publica software para este teclado y, en modo 2.4 GHz, no hay forma de
 - **Luces**: los 18 modos con miniatura animada, color (nueve predefinidos, multicolor o cualquier otro), brillo y velocidad.
 - **Perfiles de luces**: guarda combinaciones de modo, color, brillo y velocidad con nombre y aplícalas con un clic, desde el panel o desde el menú del icono.
 - **Apagado automático de luces**: al bloquear el PC y/o en un horario (por ejemplo de 23:00 a 07:00). Al desbloquear o terminar el horario vuelve el brillo que tenías. Ahorra batería.
+- **Informe**: autonomía según el brillo (horas de uso con una carga completa), estadísticas de carga y previsión de cuándo cargar.
 - **Ajustes**: idioma (español o inglés), intervalo de consulta, umbrales de aviso y apagado automático.
 - Detecta los cambios hechos con las teclas Fn del teclado y puede iniciarse con Windows.
 
 Ventana de ajustes (botón del engranaje o clic derecho en el icono):
 
 ![Ajustes](docs/settings.png)
+
+Pestaña de informe:
+
+![Informe](docs/report.png)
+
+Qué muestra el informe:
+
+- **Previsión**: cuánto te queda al ritmo actual y qué día conviene cargarlo (al llegar al umbral de batería baja).
+- **Autonomía según el brillo**: cuántas horas de uso da una carga completa con cada nivel de brillo, y cuántos puntos de batería gasta por hora. Solo cuenta el tiempo en que el teclado está despierto.
+- **Cargas**: cuándo fue la última, cargas por semana, tiempo medio entre cargas y cuánto tarda una carga de 0 a 100 %, más las cinco últimas cargas.
 
 ## Instalación
 
@@ -85,7 +96,7 @@ En todos los casos hace falta Windows 10 u 11 y el teclado conectado en alguno d
 - **Clic** en un perfil: lo aplica. **Clic derecho**: renombrar, actualizar con las luces actuales o eliminar.
 - **Engranaje**: abre los ajustes.
 
-Los perfiles, los nombres de los modos, el historial de batería (30 días), los ajustes y el registro de errores se guardan en `%APPDATA%\KooruiBattery`.
+Los perfiles, los nombres de los modos, el historial de batería (90 días), los ajustes y el registro de errores se guardan en `%APPDATA%\KooruiBattery`.
 
 ## Compilar el ejecutable
 
@@ -156,6 +167,7 @@ Las teclas Fn nunca llegan al PC (las interpreta el propio teclado), por eso las
 - No hay documentación oficial del protocolo. La lectura de batería (descarga y carga), los 18 modos, el brillo y la velocidad están validados en el teclado del autor.
 - Los nombres de los modos vienen de la tabla habitual de los teclados EVision; si alguno no describe bien el efecto, se cambia con clic derecho.
 - Las animaciones del panel son aproximaciones, no una copia exacta de los efectos del teclado.
+- El informe necesita datos: la autonomía de cada brillo aparece tras 2 h de uso con ese brillo y una caída de 3 puntos, y las estadísticas de carga tras unos días. Las lecturas guardadas antes de la v1.5.0 no incluyen el brillo, así que no cuentan para la autonomía.
 - El tiempo restante es una estimación a partir del tramo de descarga actual; necesita al menos media hora de lecturas y una caída de 3 puntos, y cambia según el uso y el brillo.
 - El aviso de carga completa salta al llegar al nivel configurado (100 % por defecto, que es donde termina de cargar el teclado del autor).
 - El apagado automático pone el brillo a 0 y guarda el valor anterior para restaurarlo. Si subes el brillo a mano mientras está activo, la app lo respeta hasta el siguiente bloqueo u horario.

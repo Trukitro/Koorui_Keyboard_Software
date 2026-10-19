@@ -47,7 +47,8 @@ from PyQt6.QtGui import (QAction, QColor, QCursor, QFont, QFontMetrics, QIcon, Q
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QColorDialog, QComboBox, QDialog,
                              QDialogButtonBox, QFormLayout, QGridLayout, QHBoxLayout,
                              QInputDialog, QLabel, QLineEdit, QMenu, QPushButton, QSlider,
-                             QSpinBox, QSystemTrayIcon, QTimeEdit, QVBoxLayout, QWidget)
+                             QSpinBox, QStackedWidget, QSystemTrayIcon, QTimeEdit,
+                             QVBoxLayout, QWidget)
 
 VID = 0x320F
 PID_WIRED, PID_DONGLE = 0x50C2, 0x50C3      # teclado por cable / receptor 2.4G
@@ -80,9 +81,10 @@ LOG_FILE = os.path.join(DATA_DIR, "error.log")
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 
 HOUR, DAY = 3600, 86400
-HISTORY_KEEP = 30 * DAY         # se descartan lecturas mas antiguas
+HISTORY_KEEP = 90 * DAY         # se descartan lecturas mas antiguas
 HISTORY_EVERY = 600             # sin cambios, una lectura cada 10 minutos
 HISTORY_GAP = 3 * HOUR          # un hueco mayor (teclado apagado) se dibuja punteado
+ACTIVE_GAP = 15 * 60            # lecturas mas separadas: el teclado estuvo en reposo
 
 BG, CARD, BORDER, TEXT, MUTED, ACCENT = "#15171c", "#1e2128", "#2c303a", "#e8eaf0", "#8a90a0", "#4da3ff"
 GREEN, BLUE = "#3fbf7f", "#2878d7"
@@ -153,6 +155,36 @@ STR = {
     "msg_full": ("Carga completa ({}%). Ya puedes desconectar el cable.",
                  "Fully charged ({}%). You can unplug the cable."),
     "kb_title": ("Teclado KOORUI", "KOORUI keyboard"),
+    "tab_panel": ("Panel", "Panel"),
+    "tab_report": ("Informe", "Report"),
+    "rep_forecast": ("PREVISIÓN", "FORECAST"),
+    "rep_left": ("Al ritmo actual te queda {}.", "At the current rate you have {} left."),
+    "rep_next": ("Conviene cargarlo {} (al llegar al {}%).",
+                 "Plan to charge it {} (when it reaches {}%)."),
+    "rep_charging_now": ("Cargando ahora.", "Charging now."),
+    "rep_no_forecast": ("Aún no hay suficiente descarga reciente para estimar.",
+                        "Not enough recent discharge to estimate yet."),
+    "today": ("hoy", "today"),
+    "tomorrow": ("mañana", "tomorrow"),
+    "rep_autonomy": ("AUTONOMÍA SEGÚN EL BRILLO", "BATTERY LIFE BY BRIGHTNESS"),
+    "rep_bright": ("Brillo {}", "Brightness {}"),
+    "rep_off": ("Luces apagadas", "Lights off"),
+    "rep_life": ("~{} de uso · {} %/h", "~{} of use · {} %/h"),
+    "rep_measuring": ("midiendo · {} registradas", "measuring · {} logged"),
+    "rep_used": ("Autonomía con carga completa, contando solo el tiempo de uso. Medido: {}.",
+                 "Battery life on a full charge, counting active use only. Measured: {}."),
+    "rep_no_usage": ("Aún no hay uso registrado. Hacen falta al menos 2 h de uso con un "
+                     "mismo brillo.",
+                     "No usage logged yet. At least 2 h of use at the same brightness "
+                     "is needed."),
+    "rep_charges": ("CARGAS", "CHARGING"),
+    "rep_last": ("Última carga", "Last charge"),
+    "rep_per_week": ("Cargas por semana", "Charges per week"),
+    "rep_between": ("Entre cargas", "Between charges"),
+    "rep_full_time": ("Carga de 0 a 100%", "Charge 0 to 100%"),
+    "rep_recent": ("ÚLTIMAS CARGAS", "RECENT CHARGES"),
+    "rep_no_charges": ("Todavía no se ha registrado ninguna carga.", "No charges logged yet."),
+    "rep_in_progress": ("en curso", "in progress"),
     "bt_only": ("no disponible por Bluetooth", "not available over Bluetooth"),
     "msg_bt_lights": ("Por Bluetooth solo se puede ver la bateria; las luces se cambian "
                       "en 2.4G o por cable.",
@@ -162,6 +194,14 @@ STR = {
     "sched_on": ("Apagar luces por horario", "Turn lights off on a schedule"),
     "sched_range": ("Horario de apagado", "Off hours"),
 }
+
+
+WEEKDAYS = (("lun", "mar", "mié", "jue", "vie", "sáb", "dom"),
+            ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"))
+WEEKDAYS_LONG = (("el lunes", "el martes", "el miércoles", "el jueves", "el viernes",
+                  "el sábado", "el domingo"),
+                 ("on Monday", "on Tuesday", "on Wednesday", "on Thursday", "on Friday",
+                  "on Saturday", "on Sunday"))
 
 
 def lang_index():
@@ -513,6 +553,67 @@ def in_schedule(now=None):
     return clock >= start or clock < end
 
 
+def active_pairs(history):
+    """Pares de lecturas seguidas descargando y con el teclado en uso (sin reposo en medio)."""
+    for a, b in zip(history, history[1:]):
+        if not a[2] and not b[2] and 0 < b[0] - a[0] <= ACTIVE_GAP:
+            yield a, b
+
+
+def autonomy_by_brightness(history):
+    """{brillo: (horas de uso medidas, puntos de bateria gastados)}."""
+    groups = {}
+    for a, b in active_pairs(history):
+        if len(a) < 5 or a[4] is None:
+            continue
+        hours, drop = groups.get(a[4], (0.0, 0))
+        groups[a[4]] = (hours + (b[0] - a[0]) / HOUR, drop + a[1] - b[1])
+    return groups
+
+
+def charge_sessions(history):
+    """[(inicio, fin, % al empezar, % al terminar, sigue cargando)] de cada carga."""
+    sessions, current, prev = [], None, None
+    for entry in history:
+        ts, pct, charging = entry[0], entry[1], entry[2]
+        if charging:
+            if current is None:
+                start = prev[1] if prev and ts - prev[0] <= HISTORY_GAP else pct
+                current = [ts, ts, start, pct]
+            else:
+                current[1], current[3] = ts, max(current[3], pct)
+        elif current is not None:
+            sessions.append((*current, False))
+            current = None
+        prev = entry
+    if current is not None:
+        sessions.append((*current, True))
+    return sessions
+
+
+def charge_stats(history, now=None):
+    """Resumen de cargas: sesiones, cargas por semana, dias entre cargas, tiempo 0-100 %."""
+    now = time.time() if now is None else now
+    sessions = charge_sessions(history)
+    span_days = (now - history[0][0]) / DAY if history else 0
+    starts = [s[0] for s in sessions]
+    full = [(s[1] - s[0]) * 100 / (s[3] - s[2]) for s in sessions
+            if not s[4] and s[3] >= 95 and s[3] - s[2] >= 20 and s[1] > s[0]]
+    return {
+        "sessions": sessions,
+        "per_week": len(sessions) / span_days * 7 if span_days >= 2 else None,
+        "between": (starts[-1] - starts[0]) / (len(starts) - 1) if len(starts) >= 2 else None,
+        "full_time": statistics.median(full) if full else None,
+    }
+
+
+def hours_text(seconds):
+    """Duracion de uso siempre en horas: '41 h' o '25 min'."""
+    if seconds < HOUR:
+        return f"{max(1, round(seconds / 60))} min"
+    return f"{seconds / HOUR:.0f} h"
+
+
 def battery_color(percent, stale=False, charging=False):
     if percent is None:
         return QColor(110, 110, 110)
@@ -710,11 +811,14 @@ class Model(QObject):
 
     # --- historial --------------------------------------------------------
     def _record(self, pct, charging, now):
+        """Guarda [hora, %, cargando, modo, brillo]; modo y brillo None si no se conocen."""
+        lights = ([self.page[OFF_MODE], self.page[OFF_BRIGHT]] if self.page is not None
+                  else [None, None])
         last = self.history[-1] if self.history else None
-        if (last and last[1] == pct and bool(last[2]) == charging
+        if (last and last[1] == pct and bool(last[2]) == charging and last[3:5] == lights
                 and now - last[0] < HISTORY_EVERY):
             return
-        self.history.append([round(now), pct, int(charging)])
+        self.history.append([round(now), pct, int(charging)] + lights)
         self.history = [h for h in self.history if h[0] >= now - HISTORY_KEEP]
         save_json(HISTORY_FILE, self.history)
 
@@ -729,20 +833,25 @@ class Model(QObject):
 
     def estimate(self):
         """Tiempo restante aproximado al ritmo del tramo de descarga actual, o ''."""
+        rate = self.discharge_rate()
+        return "~" + human(self.percent / rate) if rate else ""
+
+    def discharge_rate(self):
+        """Puntos de bateria por segundo en el tramo de descarga actual, o None."""
         if self.percent is None or self.charging:
-            return ""
+            return None
         run = []                            # del mas reciente hacia atras
-        for ts, pct, chg in reversed(list(self.history)):
+        for ts, pct, chg, *_ in reversed(list(self.history)):
             if chg or (run and pct < run[-1][1] - 3):   # carga, o subio sin que lo vieramos
                 break
             run.append((ts, pct))
         if len(run) < 2:
-            return ""
+            return None
         span = run[0][0] - run[-1][0]
         drop = run[-1][1] - run[0][1]
         if span < 30 * 60 or drop < 3:
-            return ""
-        return "~" + human(self.percent / (drop / span))
+            return None
+        return drop / span
 
     # --- escritura y sondeo -----------------------------------------------
     def refresh(self):
@@ -1159,6 +1268,161 @@ class ProfileChip(QWidget):
                    Qt.AlignmentFlag.AlignVCenter, name)
 
 
+def section_label(text):
+    label = QLabel(text)
+    label.setStyleSheet(f"color:{MUTED}; font:600 10px 'Segoe UI'; letter-spacing:1px;"
+                        "margin-top:4px;")
+    return label
+
+
+def body_label(text, color=TEXT):
+    label = QLabel(text)
+    label.setWordWrap(True)
+    label.setStyleSheet(f"color:{color}; font:12px 'Segoe UI';")
+    return label
+
+
+class AutonomyRow(QWidget):
+    """Una fila del informe: brillo, barra de autonomia y valores."""
+
+    def __init__(self, label, life, longest, detail):
+        super().__init__()
+        self.label, self.life, self.longest, self.detail = label, life, longest, detail
+        self.setFixedHeight(26)
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setFont(ui_font(12))
+        p.setPen(QColor(TEXT))
+        p.drawText(QRectF(0, 0, 100, self.height()), Qt.AlignmentFlag.AlignVCenter, self.label)
+        bar = QRectF(104, 9, self.width() - 104 - 150, 8)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(BORDER))
+        p.drawRoundedRect(bar, 4, 4)
+        if self.life:
+            fill = QRectF(bar)
+            fill.setWidth(max(8.0, bar.width() * self.life / self.longest))
+            p.setBrush(QColor(GREEN))
+            p.drawRoundedRect(fill, 4, 4)
+        p.setPen(QColor(TEXT if self.life else MUTED))
+        p.setFont(ui_font(11))
+        p.drawText(QRectF(self.width() - 142, 0, 142, self.height()),
+                   Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, self.detail)
+
+
+class StatTile(QLabel):
+    def __init__(self, value, caption):
+        super().__init__(f"<div style='font-size:17px;font-weight:600;color:{TEXT}'>{value}</div>"
+                         f"<div style='font-size:11px;color:{MUTED}'>{caption}</div>")
+        self.setStyleSheet(f"background:{CARD}; border:1px solid {BORDER}; border-radius:10px;"
+                           "padding:8px 10px; font-family:'Segoe UI';")
+
+
+class ReportView(QWidget):
+    """Pestana de informe: prevision, autonomia segun el brillo y cargas."""
+
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+        self.layout_ = QVBoxLayout(self)
+        self.layout_.setContentsMargins(0, 0, 0, 0)
+        self.body = None
+
+    def refresh(self):
+        if self.body is not None:
+            self.layout_.removeWidget(self.body)
+            self.body.setParent(None)       # fuera de la vista ya, no al borrarse
+            self.body.deleteLater()
+        self.body = QWidget()
+        box = QVBoxLayout(self.body)
+        box.setContentsMargins(0, 0, 0, 0)
+        box.setSpacing(8)
+        history = list(self.model.history)
+        self.add_forecast(box)
+        self.add_autonomy(box, history)
+        self.add_charges(box, history)
+        box.addStretch()
+        self.layout_.addWidget(self.body)
+
+    def add_forecast(self, box):
+        m = self.model
+        box.addWidget(section_label(tr("rep_forecast")))
+        rate = m.discharge_rate()
+        if m.charging:
+            box.addWidget(body_label(tr("rep_charging_now")))
+        elif not rate:
+            box.addWidget(body_label(tr("rep_no_forecast"), MUTED))
+        else:
+            box.addWidget(body_label(tr("rep_left", "~" + human(m.percent / rate))))
+            low = CFG["low"]
+            when = time.time() + max(0, m.percent - low) / rate
+            days = (time.localtime(when).tm_yday - time.localtime().tm_yday) % 366
+            if days == 0:
+                day = tr("today")
+            elif days == 1:
+                day = tr("tomorrow")
+            else:
+                day = WEEKDAYS_LONG[lang_index()][time.localtime(when).tm_wday]
+            box.addWidget(body_label(tr("rep_next", day, low), MUTED))
+
+    def add_autonomy(self, box, history):
+        box.addWidget(section_label(tr("rep_autonomy")))
+        groups = autonomy_by_brightness(history)
+        if not groups:
+            box.addWidget(body_label(tr("rep_no_usage"), MUTED))
+            return
+        lives = {b: 100 * h / d for b, (h, d) in groups.items() if h >= 2 and d >= 3}
+        longest = max(lives.values(), default=1)
+        for bright in sorted(groups, reverse=True):
+            hours, drop = groups[bright]
+            label = tr("rep_bright", bright) if bright else tr("rep_off")
+            if bright in lives:
+                detail = tr("rep_life", hours_text(lives[bright] * HOUR),
+                            f"{drop / hours:.1f}")
+            else:
+                detail = tr("rep_measuring", hours_text(hours * HOUR))
+            box.addWidget(AutonomyRow(label, lives.get(bright), longest, detail))
+        total = sum(h for h, _ in groups.values())
+        box.addWidget(body_label(tr("rep_used", hours_text(total * HOUR)), MUTED))
+
+    def add_charges(self, box, history):
+        box.addWidget(section_label(tr("rep_charges")))
+        stats = charge_stats(history)
+        sessions = stats["sessions"]
+        last = sessions[-1] if sessions else None
+        if last is None:
+            last_text = "-"
+        elif last[4]:
+            last_text = tr("rep_in_progress")
+        else:
+            last_text = ago(last[1])
+        values = (
+            (last_text, tr("rep_last")),
+            (f"{stats['per_week']:.1f}" if stats["per_week"] is not None else "-",
+             tr("rep_per_week")),
+            (human(stats["between"]) if stats["between"] else "-", tr("rep_between")),
+            ("~" + human(stats["full_time"]) if stats["full_time"] else "-",
+             tr("rep_full_time")),
+        )
+        grid = QGridLayout()
+        grid.setSpacing(6)
+        for n, (value, caption) in enumerate(values):
+            grid.addWidget(StatTile(value, caption), n // 2, n % 2)
+        box.addLayout(grid)
+        box.addWidget(section_label(tr("rep_recent")))
+        if not sessions:
+            box.addWidget(body_label(tr("rep_no_charges"), MUTED))
+            return
+        names = WEEKDAYS[lang_index()]
+        for start, end, frm, to, ongoing in reversed(sessions[-5:]):
+            day = time.localtime(start)
+            text = (f"{names[day.tm_wday]} {day.tm_mday:02d}/{day.tm_mon:02d} "
+                    f"{time.strftime('%H:%M', day)}  ·  {frm}% → {to}%  ·  ")
+            text += tr("rep_in_progress") if ongoing else human(max(60, end - start))
+            box.addWidget(body_label(text))
+
+
 class ModeDialog(QDialog):
     def __init__(self, parent, mode, name, effect):
         super().__init__(parent)
@@ -1281,19 +1545,42 @@ class Panel(QWidget):
         header.addWidget(self.gear)
         root.addLayout(header)
 
-        root.addWidget(self.section("history"))
+        tabs = QHBoxLayout()
+        tabs.setSpacing(4)
+        self.tab_buttons = []
+        for index in range(2):
+            button = QPushButton()
+            button.setCheckable(True)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setStyleSheet(
+                f"QPushButton{{background:transparent;border:none;color:{MUTED};"
+                "border-bottom:2px solid transparent;border-radius:0;padding:4px 10px;"
+                "font:600 12px 'Segoe UI';}"
+                f"QPushButton:checked{{color:{TEXT};border-bottom:2px solid {ACCENT};}}"
+                f"QPushButton:hover{{color:{TEXT};}}")
+            button.clicked.connect(lambda _, n=index: self.show_tab(n))
+            self.tab_buttons.append(button)
+            tabs.addWidget(button)
+        tabs.addStretch()
+        root.addLayout(tabs)
+
+        main = QWidget()
+        body = QVBoxLayout(main)
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(8)
+        body.addWidget(self.section("history"))
         self.history = HistoryView(model)
-        root.addWidget(self.history)
+        body.addWidget(self.history)
 
         self.keyboard = KeyboardView(model)
-        root.addWidget(self.keyboard)
+        body.addWidget(self.keyboard)
 
-        root.addWidget(self.section("profiles"))
+        body.addWidget(self.section("profiles"))
         self.profile_grid = QGridLayout()
         self.profile_grid.setSpacing(6)
-        root.addLayout(self.profile_grid)
+        body.addLayout(self.profile_grid)
 
-        root.addWidget(self.section("light_mode"))
+        body.addWidget(self.section("light_mode"))
         grid = QGridLayout()
         grid.setSpacing(6)
         self.tiles = []
@@ -1301,9 +1588,9 @@ class Panel(QWidget):
             tile = ModeTile(model, n + 1, self.edit_mode)
             self.tiles.append(tile)
             grid.addWidget(tile, n // 6, n % 6)
-        root.addLayout(grid)
+        body.addLayout(grid)
 
-        root.addWidget(self.section("color"))
+        body.addWidget(self.section("color"))
         row = QHBoxLayout()
         row.setSpacing(4)
         self.swatches = [Swatch(model, (es, en), rgb) for es, en, rgb in COLORS]
@@ -1312,10 +1599,17 @@ class Panel(QWidget):
         for s in self.swatches:
             row.addWidget(s)
         row.addStretch()
-        root.addLayout(row)
+        body.addLayout(row)
 
-        self.bright = self.slider_row(root, "brightness", OFF_BRIGHT)
-        self.speed = self.slider_row(root, "speed", OFF_SPEED)
+        self.bright = self.slider_row(body, "brightness", OFF_BRIGHT)
+        self.speed = self.slider_row(body, "speed", OFF_SPEED)
+
+        self.report = ReportView(model)
+        self.stack = QStackedWidget()
+        self.stack.addWidget(main)
+        self.stack.addWidget(self.report)
+        root.addWidget(self.stack)
+        self.show_tab(0)
 
         self.timer = QTimer(self)
         self.timer.setInterval(40)
@@ -1377,6 +1671,8 @@ class Panel(QWidget):
         for swatch in self.swatches:
             swatch.retranslate()
         self.gear.setToolTip(tr("settings"))
+        for button, key in zip(self.tab_buttons, ("tab_panel", "tab_report")):
+            button.setText(tr(key))
         self.rebuild_profiles()
         self.sync()
 
@@ -1396,7 +1692,16 @@ class Panel(QWidget):
         self.labels["light_mode"].setText(f"{tr('light_mode')}  ·  {current}")
         window = m.history_window()[1]
         self.labels["history"].setText(f"{tr('history')}  ·  {tr('last', human(window))}")
+        if self.stack.currentIndex() == 1:
+            self.report.refresh()
         self.update()
+
+    def show_tab(self, index):
+        self.stack.setCurrentIndex(index)
+        for n, button in enumerate(self.tab_buttons):
+            button.setChecked(n == index)
+        if index == 1:
+            self.report.refresh()
 
     def animate(self):
         self.keyboard.update()

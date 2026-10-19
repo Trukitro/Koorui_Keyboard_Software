@@ -1,6 +1,6 @@
 # Plan a futuro
 
-Estado actual: **v1.4.0**. Batería con detección de carga, historial y estimación, avisos configurables, perfiles de luces, apagado automático, ajustes con idioma, instalador para Windows, y modos cable y Bluetooth como opciones.
+Estado actual: **v1.5.0**. Batería con detección de carga, historial y estimación, avisos configurables, perfiles de luces, apagado automático, ajustes con idioma, instalador para Windows, modos cable y Bluetooth como opciones, e informe de autonomía y cargas.
 
 El plan está ordenado por prioridad. Primero va confirmar lo que hoy son suposiciones, porque varias funciones futuras dependen de ello.
 
@@ -19,6 +19,8 @@ Ya validado en el teclado real: batería (descarga y carga), los 18 modos, brill
 - ~~Detectar si está cargando.~~ Hecho: el byte 9 de la respuesta de `0x1A` vale 1 con el cable conectado.
 - ~~Aviso de carga completa.~~ Hecho en v1.2.0.
 - ~~Historial y estimación.~~ Hecho en v1.2.0: gráfica de hasta 7 días y tiempo restante aproximado.
+- ~~Informe de autonomía según el brillo y estadísticas de carga.~~ Hecho en v1.5.0.
+- **Desgaste de la batería**: comparar la autonomía de un mismo brillo mes a mes, cuando haya semanas de datos.
 - **Actualizar al usar el teclado** en lugar de cada 30 segundos fijos, y dejar de consultar cuando lleva rato inactivo.
 - ~~Umbral de aviso configurable y aviso crítico.~~ Hecho en v1.2.0.
 

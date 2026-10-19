@@ -37,12 +37,23 @@ KOORUI does not publish software for this keyboard and, in 2.4 GHz mode, there i
 - **Lighting**: all 18 modes with an animated thumbnail, color (nine presets, multicolor or any other), brightness and speed.
 - **Lighting profiles**: save combinations of mode, color, brightness and speed under a name and apply them with one click, from the panel or from the tray menu.
 - **Automatic lights off**: when the PC is locked and/or on a schedule (for example 23:00 to 07:00). On unlock or when the schedule ends, your previous brightness comes back. Saves battery.
+- **Report**: battery life by brightness (hours of use on a full charge), charging statistics and a forecast of when to charge.
 - **Settings**: language (English or Spanish), polling interval, notification thresholds and automatic lights off.
 - Picks up changes made with the keyboard's Fn keys and can start with Windows.
 
 Settings window (gear button or right-click on the tray icon):
 
 ![Settings](docs/settings.png)
+
+Report tab:
+
+![Report](docs/report.png)
+
+What the report shows:
+
+- **Forecast**: how long the battery lasts at the current rate and which day to charge it (when it reaches the low-battery threshold).
+- **Battery life by brightness**: hours of use a full charge gives at each brightness level, and battery points used per hour. Only time while the keyboard is awake counts.
+- **Charging**: last charge, charges per week, average time between charges and how long a 0 to 100% charge takes, plus the last five charges.
 
 ## Installation
 
@@ -85,7 +96,7 @@ In all cases you need Windows 10 or 11 and the keyboard connected in one of the 
 - **Click** a profile: applies it. **Right-click**: rename, update with the current lights, or delete.
 - **Gear**: opens the settings.
 
-Profiles, mode names, battery history (30 days), settings and the error log are stored in `%APPDATA%\KooruiBattery`.
+Profiles, mode names, battery history (90 days), settings and the error log are stored in `%APPDATA%\KooruiBattery`.
 
 ## Building
 
@@ -156,6 +167,7 @@ Fn keys never reach the PC (the keyboard handles them internally), which is why 
 - There is no official documentation for the protocol. The battery reading (discharging and charging), the 18 modes, brightness and speed have been validated on the author's keyboard.
 - Mode names come from the usual EVision keyboard table; if one does not describe the effect well, change it with a right-click.
 - The panel animations are approximations, not an exact copy of the keyboard's effects.
+- The report needs data: battery life for a brightness level appears after 2 h of use at that level with a 3-point drop, and charging statistics after a few days. Readings stored before v1.5.0 do not include brightness, so they do not count towards battery life.
 - Time left is an estimate based on the current discharge run; it needs at least half an hour of readings and a 3-point drop, and it varies with usage and brightness.
 - The fully-charged notification fires at the configured level (100% by default, which is where the author's keyboard finishes charging).
 - Automatic lights off sets brightness to 0 and stores the previous value to restore it. If you raise the brightness by hand while it is active, the app respects that until the next lock or schedule.
