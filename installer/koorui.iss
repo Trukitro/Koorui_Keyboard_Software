@@ -4,7 +4,7 @@
 
 #define AppName "Koorui Keyboard"
 #ifndef AppVersion
-  #define AppVersion "1.9.0"
+  #define AppVersion "1.9.1"
 #endif
 #define AppExe "KooruiKeyboard.exe"
 

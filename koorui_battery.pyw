@@ -98,10 +98,11 @@ HISTORY_GAP = 3 * HOUR          # un hueco mayor (teclado apagado) se dibuja pun
 ACTIVE_GAP = 15 * 60            # lecturas mas separadas: el teclado estuvo en reposo
 IDLE_AFTER = 3 * 60             # sin pulsaciones durante este tiempo: teclado en reposo
 IDLE_POLL = 5 * 60              # intervalo de consulta mientras esta en reposo
+NO_READING_WARN = 60 * 60       # avisar si se usa el teclado y no hay lectura en este tiempo
 ACTIVITY_KEEP = 90             # dias de uso y pulsaciones que se conservan
 HEAT_DAYS = 30                 # dias que suma el mapa de calor
 
-APP_VERSION = "1.9.0"
+APP_VERSION = "1.9.1"
 FROZEN = getattr(sys, "frozen", False)  # ejecutable empaquetado (no desde el codigo)
 SETUP_NAME, SUMS_NAME = "KooruiKeyboardSetup.exe", "SHA256SUMS.txt"
 BREAK_GAP = 5 * 60              # una parada mas larga cuenta como pausa
@@ -219,6 +220,10 @@ STR = {
     "full_notify": ("Avisar cuando termine de cargar", "Notify when charging is done"),
     "full_level": ("Considerar cargado al", "Treat as charged at"),
     "msg_no_reply": ("El teclado no respondió", "The keyboard did not respond"),
+    "msg_no_reading": ("No se puede leer la batería (última lectura: {}). "
+                       "El motivo queda en error.log.",
+                       "The battery cannot be read (last reading: {}). "
+                       "The reason is saved in error.log."),
     "msg_rejected": ("El teclado rechazó el cambio", "The keyboard rejected the change"),
     "msg_low": ("Batería baja: {}%", "Low battery: {}%"),
     "msg_critical": ("Batería crítica: {}%. Conecta el cable.",
@@ -572,7 +577,13 @@ def find_link():
     bluetooth = hid.enumerate(BT_VID, BT_PID)
     if bluetooth:
         return LINK_BT, bluetooth[0]["path"]
-    path = vendor_path(PID_DONGLE)
+    return dongle_link()
+
+
+def dongle_link():
+    """(LINK_24G, ruta) del receptor 2.4G, o (None, None) si no esta enchufado."""
+    path = next((d["path"] for d in hid.enumerate(VID, PID_DONGLE)
+                 if (d["usage_page"], d["usage"]) == (USAGE_PAGE, USAGE)), None)
     return (LINK_24G, path) if path else (None, None)
 
 
@@ -583,9 +594,10 @@ class Keyboard:
         self.lock = threading.Lock()
         self.dev = None
         self.link = None        # LINK_USB, LINK_24G, LINK_BT o None
+        self.error = ""         # por que fallo la ultima lectura de bateria ("" si fue bien)
 
-    def _open(self):
-        self.link, path = find_link()
+    def _open(self, link=None):
+        self.link, path = link or find_link()
         if path is None:
             raise OSError("teclado no conectado")
         if self.link == LINK_BT:
@@ -633,23 +645,44 @@ class Keyboard:
         """
         with self.lock:
             try:
-                link, path = find_link()
-                if link == LINK_BT:
-                    self.link = link
-                    percent = bluetooth_battery(path)
-                    return None if percent is None else (percent, False)
-                self._open()
-                samples, charging = [], False
+                link = find_link()
+                if link[0] == LINK_BT:
+                    self.link = LINK_BT
+                    percent = bluetooth_battery(link[1])
+                    if percent is not None:
+                        self.error = ""
+                        return percent, False
+                    # Windows puede seguir mostrando el teclado por Bluetooth aunque ya
+                    # este por el receptor: en ese caso se lee por el receptor.
+                    link = dongle_link()
+                    if link[1] is None:
+                        self.error = "Bluetooth sin porcentaje y sin receptor 2.4G"
+                        return None
+                if link[1] is None:
+                    self.error = "teclado no conectado (sin receptor ni cable)"
+                    return None
+                try:
+                    self._open(link)
+                except OSError as e:
+                    self.error = f"no se pudo abrir {link[0]}: {e}"
+                    return None
+                samples, charging, last = [], False, None
                 for _ in range(5):
                     r = self._tx(CMD_BATTERY)
+                    if r:
+                        last = r
                     if r and r[7] == 0 and 1 <= r[8] <= 100:
                         samples.append(r[8])
                         charging = r[9] == 1
                     time.sleep(0.05)
                 if not samples:
+                    self.error = (f"respuesta no valida por {link[0]}: {list(last[3:12])}"
+                                  if last else f"sin respuesta por {link[0]}")
                     return None
+                self.error = ""
                 return round(statistics.median(samples)), charging
-            except OSError:
+            except OSError as e:
+                self.error = f"error de E/S: {e}"
                 return None
             finally:
                 self._close()
@@ -709,6 +742,16 @@ def log_error():
     os.makedirs(DATA_DIR, exist_ok=True)
     with open(LOG_FILE, "a", encoding="utf-8") as f:
         f.write(time.strftime("%Y-%m-%d %H:%M:%S\n") + traceback.format_exc() + "\n")
+
+
+def log_note(text):
+    """Una linea de diagnostico en error.log (no es un fallo de la app)."""
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} v{APP_VERSION} {text}\n")
+    except OSError:
+        pass
 
 
 def ago(ts):
@@ -989,6 +1032,24 @@ def autostart_enabled():
         return False
 
 
+def fix_autostart():
+    """Si el inicio con Windows apunta a otro ejecutable (una compilacion vieja en dist,
+    por ejemplo), lo cambia por el que esta en marcha. Solo en la version empaquetada."""
+    if not getattr(sys, "frozen", False):
+        return
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as k:
+            current = winreg.QueryValueEx(k, APP_NAME)[0]
+    except OSError:
+        return                              # no esta activado: no se toca
+    if current != autostart_command():
+        try:
+            set_autostart(True)
+            log_note(f"inicio con Windows corregido: {current} -> {autostart_command()}")
+        except OSError:
+            pass
+
+
 def set_autostart(enabled):
     with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as k:
         if enabled:
@@ -1034,6 +1095,9 @@ class Model(QObject):
         self.last_activity = 0.0
         self.last_minute = 0
         self.last_poll = 0.0
+        self.fail_since = 0.0               # desde cuando falla la lectura de bateria
+        self.fail_reason = ""
+        self.fail_warned = False
         self.pressed = set()
         self.update = None                  # (version, enlace, datos) si hay una version nueva
         self.session_start = 0.0            # inicio de la racha de escritura actual
@@ -1282,8 +1346,31 @@ class Model(QObject):
                 self.warned.add("forecast")
                 self.message.emit(tr("msg_forecast", CFG["low"], when_text(when)))
 
+    def _reading_health(self, ok):
+        """Anota en error.log cuando la lectura empieza a fallar, cambia de motivo o se
+        recupera, y avisa una vez si lleva mas de una hora sin leer mientras se usa."""
+        now = time.time()
+        if ok:
+            if self.fail_since:
+                log_note(f"bateria: vuelve a leerse tras {human(now - self.fail_since)} sin lectura")
+            self.fail_since, self.fail_reason, self.fail_warned = 0.0, "", False
+            return
+        reason = self.kb.error or "motivo desconocido"
+        if not self.fail_since:
+            self.fail_since = now
+        if reason != self.fail_reason:
+            self.fail_reason = reason
+            log_note(f"bateria: sin lectura ({reason})")
+        in_use = now - self.last_activity < 10 * 60
+        if (in_use and not self.fail_warned and now - self.fail_since > NO_READING_WARN
+                and now - self.state.get("time", 0) > NO_READING_WARN):
+            self.fail_warned = True
+            self.message.emit(tr("msg_no_reading", ago(self.state["time"])
+                                 if self.state.get("time") else tr("no_data")))
+
     def _poll(self):
         reading = self.kb.battery()
+        self._reading_health(reading is not None)
         if reading is not None:
             pct, charging = reading
             now = time.time()
@@ -3079,6 +3166,7 @@ def main():
     mutex = ctypes.windll.kernel32.CreateMutexW(None, False, APP_NAME + "Mutex")
     if ctypes.windll.kernel32.GetLastError() == 183:
         return
+    fix_autostart()
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     field = (f"background:{CARD};color:{TEXT};border:1px solid {BORDER};"
